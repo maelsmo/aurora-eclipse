@@ -1,0 +1,89 @@
+// Glyphs use a 100 × 100 design space. Strokes share a 22-unit diameter,
+// round terminals and round joins. Diacritics and descenders use the overshoot.
+export const latin = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+export const cyrillic = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
+type Glyph = { stroke?: string; outline?: string; dots?: number[][] }
+const strokes: Record<string, string> = {
+  B: "M17 87V13H49Q77 13 77 31Q77 50 49 50H20M47 50Q82 50 82 69Q82 87 51 87H18",
+  C: "M78 20Q67 12 49 12C1 12 2 88 48 88Q68 88 80 77",
+  D: "M16 87V13H43C94 13 94 87 43 87Z",
+  F: "M18 87V14H81M20 49H68",
+  G: "M77 20Q68 12 47 12C0 12 1 88 48 88Q67 88 80 79V54H53",
+  H: "M15 13V87M81 13V87M17 50H79",
+  I: "M24 13H72M48 15V85M24 87H72",
+  J: "M37 13H77V64C77 97 24 96 16 73",
+  K: "M16 13V87M79 13L24 53M40 42L82 87",
+  L: "M18 13V85Q18 87 23 87H80",
+  M: "M13 87V15Q13 8 19 16L46 51Q48 54 51 50L78 15Q83 10 83 16V87",
+  N: "M16 87V15Q16 9 20 15L76 85Q81 92 81 84V13",
+  O: "M48 12C72 12 83 25 83 50C83 75 72 88 48 88C24 88 13 74 13 50C13 26 24 12 48 12Z",
+  P: "M17 88V13H48C90 13 90 55 48 55H18",
+  Q: "M48 12C94 12 94 87 48 87C2 87 2 12 48 12ZM57 66L83 91",
+  R: "M17 88V13H48C90 13 90 54 48 54H18M46 55L81 87",
+  S: "M78 21Q66 12 49 12C7 12 4 43 43 50L56 52C97 59 87 89 48 89Q27 89 14 77",
+  T: "M11 13H85M48 15V87",
+  U: "M15 13V57C15 98 81 98 81 57V13",
+  V: "M12 13L42 80Q48 95 55 80L84 13",
+  W: "M9 13L24 83Q25 93 29 82L45 42Q48 33 51 42L68 83Q71 91 73 81L87 13",
+  X: "M14 13L82 87M81 13L14 87",
+  Y: "M13 13L47 55L82 13M47 55V87",
+  Z: "M16 13H79Q83 13 79 18L17 82Q13 87 19 87H82",
+  Б: "M77 13H17V87H50C94 87 93 48 50 48H19",
+  Г: "M17 87V14H80",
+  Д: "M11 84H86M8 84V97M88 84V97M19 82Q33 63 34 15H72V83",
+  Ж: "M48 13V87M10 14L42 49L9 86M86 14L54 49L87 86",
+  З: "M15 23Q30 11 53 13C87 13 88 47 57 49L41 50M53 50C93 50 88 88 49 88Q25 88 13 77",
+  И: "M15 13V85Q15 91 20 84L76 16Q81 9 81 16V87",
+  Л: "M10 87Q24 87 29 59L38 15H77V87",
+  П: "M15 87V14H80V87",
+  У: "M12 13L47 59M81 13L47 65Q35 91 13 87",
+  Ф: "M48 9V92M48 23C0 23 0 74 48 74C96 74 96 23 48 23Z",
+  Ц: "M14 13V84H77V13M77 84H87V97",
+  Ч: "M14 13V31Q14 63 76 49M78 13V87",
+  Ш: "M10 13V86H86V13M48 14V84",
+  Щ: "M10 13V85H81V13M46 14V83M81 85H90V97",
+  Ъ: "M8 13H33V87H57C94 87 94 49 57 49H34",
+  Ы: "M12 13V87H32C69 87 69 49 32 49H14M84 13V87",
+  Ь: "M17 13V87H50C92 87 92 48 50 48H18",
+  Э: "M16 20Q29 12 47 12C94 12 94 88 48 88Q27 88 15 77M40 50H78",
+  Ю: "M10 13V87M10 50H36M62 13C95 13 95 87 62 87C29 87 29 13 62 13Z",
+  Я: "M79 87V13H48C6 13 6 55 48 55H78M50 55L15 87",
+}
+const signature: Record<string, Glyph> = {
+  // The counter and the detached terminal are independent negative/positive modules.
+  A: {
+    outline:
+      "M4 85Q3 67 17 62L27 59Q35 56 32 51Q30 48 23 48H15C1 48 0 28 14 27L22 26Q30 25 32 15Q34 1 46 1H53Q65 1 66 14Q67 25 76 26Q91 27 91 37Q91 48 79 49L66 50Q58 51 58 56Q58 61 66 61H78Q90 61 90 69Q90 77 78 77H36Q25 77 29 87Q34 99 21 101Q5 104 4 90ZM57 32A8.8 8.8 0 1 0 39.4 32A8.8 8.8 0 1 0 57 32Z",
+    dots: [[77, 92, 9.5]],
+  },
+  E: {
+    outline:
+      "M17 2H75C92 2 92 23 75 23H49Q35 23 35 33Q35 42 49 42H73C90 42 90 62 73 62H48Q34 62 34 71Q34 80 48 80H80C98 80 98 101 80 101H17Q1 101 3 88Q4 80 12 76Q24 69 14 63L11 61Q1 57 3 47Q4 40 14 36Q26 31 16 24L11 21Q2 17 4 10Q6 2 17 2Z",
+  },
+}
+const aliases: Record<string, string> = {
+  А: "A",
+  В: "B",
+  Е: "E",
+  К: "K",
+  М: "M",
+  Н: "H",
+  О: "O",
+  Р: "P",
+  С: "C",
+  Т: "T",
+  Х: "X",
+}
+export function getGlyph(letter: string): Glyph {
+  const key = aliases[letter] ?? letter
+  if (key === "Ё")
+    return {
+      ...signature.E,
+      dots: [
+        [32, -9, 5],
+        [60, -9, 5],
+      ],
+    }
+  if (key === "Й") return { stroke: strokes.И + " M34 0Q47 12 62 0" }
+  return signature[key] ?? { stroke: strokes[key] }
+}
