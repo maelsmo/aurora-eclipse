@@ -1,0 +1,290 @@
+// Compiles a glyph construction into absolute geometry for one set of axes.
+// All seven construction rules live here, so every glyph obeys them equally.
+
+import type { Axes } from "./axes"
+import { CAP } from "./grid"
+import type {
+  Alphabet,
+  Box,
+  CompiledGlyph,
+  CompiledPrim,
+  PrimDef,
+  Vec,
+} from "./types"
+
+const EPS = 1e-3
+const DEG = Math.PI / 180
+
+/** Default radii, × weight (dots, holes, slots) — shared by the whole alphabet. */
+export const DOT_RADIUS = 0.5
+export const HOLE_RADIUS = 0.3
+export const SLOT_RADIUS = 0.22
+
+/** Glyph modules including the base glyph (Ё = E + …). */
+export function glyphPrims(
+  char: string,
+  alphabet: Alphabet,
+  depth = 0,
+): PrimDef[] | null {
+  const g = alphabet[char]
+  if (!g) return null
+  if (!g.base || depth > 3) return g.prims
+  return [...(glyphPrims(g.base, alphabet, depth + 1) ?? []), ...g.prims]
+}
+
+export function glyphAdvance(
+  char: string,
+  alphabet: Alphabet,
+  depth = 0,
+): number {
+  const g = alphabet[char]
+  if (!g) return 3
+  if (g.adv !== undefined || !g.base || depth > 3) return g.adv ?? 3
+  return glyphAdvance(g.base, alphabet, depth + 1)
+}
+
+function segDist(p: Vec, a: Vec, b: Vec) {
+  const bx = b[0] - a[0],
+    by = b[1] - a[1]
+  const len = bx * bx + by * by
+  const t =
+    len > 0
+      ? Math.max(0, Math.min(1, ((p[0] - a[0]) * bx + (p[1] - a[1]) * by) / len))
+      : 0
+  return Math.hypot(p[0] - a[0] - bx * t, p[1] - a[1] - by * t)
+}
+
+const angleNorm = (a: number) => ((a % 360) + 360) % 360
+
+function onArc(p: Vec, arc: Extract<PrimDef, { kind: "arc" }>) {
+  const dx = p[0] - arc.c[0],
+    dy = p[1] - arc.c[1]
+  if (Math.abs(Math.hypot(dx, dy) - arc.r) > EPS) return false
+  const span = arc.a1 - arc.a0
+  if (span >= 360 - EPS) return true
+  const a = angleNorm(Math.atan2(dy, dx) / DEG - arc.a0)
+  return a <= span + 0.01
+}
+
+function arcEnds(arc: Extract<PrimDef, { kind: "arc" }>): [Vec, Vec] {
+  return [arc.a0, arc.a1].map((a) => [
+    arc.c[0] + Math.cos(a * DEG) * arc.r,
+    arc.c[1] + Math.sin(a * DEG) * arc.r,
+  ]) as [Vec, Vec]
+}
+
+const close = (a: Vec, b: Vec) =>
+  Math.abs(a[0] - b[0]) < EPS && Math.abs(a[1] - b[1]) < EPS
+const norm = (v: Vec): Vec => {
+  const l = Math.hypot(v[0], v[1]) || 1
+  return [v[0] / l, v[1] / l]
+}
+
+/** What happens to a stroke end at a junction. */
+export type EndAction = "none" | "extend" | "retract"
+
+const axisAligned = (u: Vec) => Math.abs(u[0]) > 0.99 || Math.abs(u[1]) > 0.99
+
+/**
+ * Rule 3 (overshoot) and clean joins.
+ * - A horizontal or vertical end that meets the side of another stroke passes
+ *   through it ("extend"); a diagonal end there hides inside it ("retract").
+ * - At a corner (end meets end) the more horizontal axis-aligned stroke passes
+ *   through, the other one hides inside its terminal. Symmetric corners (V) and
+ *   tangent continuations (stroke into arc) keep a round join ("none").
+ * - Hidden ends never touch the outer contour, so smooth unions cannot swell there.
+ */
+export function junctionEnds(prims: PrimDef[]): [EndAction, EndAction][] {
+  return prims.map((p, i) => {
+    if (p.kind !== "stroke") return ["none", "none"]
+    return [0, 1].map((e): EndAction => {
+      const P = e === 0 ? p.a : p.b,
+        Q = e === 0 ? p.b : p.a
+      const u = norm([P[0] - Q[0], P[1] - Q[1]])
+      let side = false,
+        corner = false,
+        tangent = false,
+        iWin = true,
+        otherWins = false
+      const atCorner = (v: Vec, canWin: boolean) => {
+        corner = true
+        if (Math.abs(u[0] * v[0] + u[1] * v[1]) > 0.98) tangent = true
+        if (!axisAligned(u) || Math.abs(u[0]) <= Math.abs(v[0]) + 0.05) iWin = false
+        if (canWin && axisAligned(v) && Math.abs(v[0]) > Math.abs(u[0]) + 0.05) otherWins = true
+      }
+      prims.forEach((q, j) => {
+        if (j === i) return
+        if (q.kind === "stroke") {
+          if (segDist(P, q.a, q.b) > EPS) return
+          const qa = close(P, q.a)
+          if (!qa && !close(P, q.b)) {
+            side = true
+            return
+          }
+          // Direction of the partner pointing out of the shared node.
+          const v = norm(qa ? [q.a[0] - q.b[0], q.a[1] - q.b[1]] : [q.b[0] - q.a[0], q.b[1] - q.a[1]])
+          atCorner(v, q.ends?.[qa ? 0 : 1] !== "flush")
+        } else if (q.kind === "arc") {
+          if (!onArc(P, q)) return
+          const atEnd = q.a1 - q.a0 < 360 - EPS && arcEnds(q).some((x) => close(P, x))
+          if (!atEnd) {
+            side = true
+            return
+          }
+          const a = Math.atan2(P[1] - q.c[1], P[0] - q.c[0])
+          atCorner([-Math.sin(a), Math.cos(a)], false)
+        }
+      })
+      if (!side && !corner) return "none"
+      if (p.ends?.[e] === "flush") return tangent ? "none" : "retract"
+      if (side) return axisAligned(u) ? "extend" : "retract"
+      if (tangent) return "none"
+      if (iWin) return "extend"
+      return otherWins ? "retract" : "none"
+    }) as [EndAction, EndAction]
+  })
+}
+
+/** Maps design coordinates onto the deformed grid of the given axes. */
+export function gridMap(axes: Axes) {
+  const tH = axes.weight * axes.contrast
+  // Cap height stays constant: thicker horizontals squeeze the gaps between them.
+  const ky = Math.max(0.55, (CAP - tH) / (CAP - 1))
+  const kx = axes.width
+  const map = (p: Vec): Vec => [
+    axes.weight / 2 + (p[0] - 0.5) * kx,
+    CAP / 2 + (p[1] - CAP / 2) * ky,
+  ]
+  return { map, kx, ky }
+}
+
+function grow(box: Box, x: number, y: number, r: number) {
+  box.x0 = Math.min(box.x0, x - r)
+  box.y0 = Math.min(box.y0, y - r)
+  box.x1 = Math.max(box.x1, x + r)
+  box.y1 = Math.max(box.y1, y + r)
+}
+
+export function compilePrims(prims: PrimDef[], axes: Axes): CompiledGlyph {
+  const { map, kx, ky } = gridMap(axes)
+  const junction = junctionEnds(prims)
+  const round = Math.max(0, Math.min(1, axes.terminal))
+  const out: CompiledPrim[] = []
+  const box: Box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }
+  prims.forEach((p, i) => {
+    switch (p.kind) {
+      case "stroke": {
+        let a = map(p.a),
+          b = map(p.b)
+        const dir = norm([b[0] - a[0], b[1] - a[1]])
+        // Rule 2: contrast thickens horizontals relative to verticals.
+        const t =
+          axes.weight * (1 + (axes.contrast - 1) * dir[0] * dir[0]) * (p.w ?? 1)
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1])
+        const shift = (act: EndAction) =>
+          act === "extend" ? axes.overshoot * t : act === "retract" ? -Math.min(t / 2, len * 0.45) : 0
+        const sa = shift(junction[i][0]),
+          sb = shift(junction[i][1])
+        a = [a[0] - dir[0] * sa, a[1] - dir[1] * sa]
+        b = [b[0] + dir[0] * sb, b[1] + dir[1] * sb]
+        out.push({ kind: "stroke", a, b, r: t / 2, round })
+        grow(box, a[0], a[1], t / 2)
+        grow(box, b[0], b[1], t / 2)
+        break
+      }
+      case "arc": {
+        const c = map(p.c)
+        // Arcs sit between horizontals and verticals: average contrast.
+        const t = axes.weight * (1 + (axes.contrast - 1) * 0.5) * (p.w ?? 1)
+        const a0 = p.a0 * DEG,
+          a1 = Math.max(p.a1, p.a0 + 1) * DEG
+        out.push({
+          kind: "arc",
+          c,
+          r: p.r,
+          sx: kx,
+          sy: ky,
+          a0,
+          a1,
+          half: t / 2,
+          round,
+        })
+        const n = 24
+        for (let k = 0; k <= n; k++) {
+          const a = a0 + ((a1 - a0) * k) / n
+          grow(
+            box,
+            c[0] + Math.cos(a) * p.r * kx,
+            c[1] + Math.sin(a) * p.r * ky,
+            t / 2,
+          )
+        }
+        break
+      }
+      case "dot": {
+        const c = map(p.c),
+          r = DOT_RADIUS * axes.weight * axes.satellite * (p.s ?? 1)
+        out.push({ kind: "dot", c, r })
+        grow(box, c[0], c[1], r)
+        break
+      }
+      case "hole": {
+        const c = map(p.c)
+        out.push({
+          kind: "hole",
+          c,
+          r: HOLE_RADIUS * axes.weight * axes.counter * (p.s ?? 1),
+        })
+        break
+      }
+      case "slot":
+        out.push({
+          kind: "slot",
+          a: map(p.a),
+          b: map(p.b),
+          r: SLOT_RADIUS * axes.weight * axes.counter * (p.s ?? 1),
+        })
+        break
+    }
+  })
+  if (!Number.isFinite(box.x0)) Object.assign(box, { x0: 0, y0: 0, x1: 1, y1: 1 })
+  const shear = Math.tan(Math.max(-30, Math.min(30, axes.slant)) * DEG)
+  if (shear !== 0) {
+    const dx0 = (box.y0 - CAP / 2) * shear,
+      dx1 = (box.y1 - CAP / 2) * shear
+    box.x0 += Math.min(dx0, dx1)
+    box.x1 += Math.max(dx0, dx1)
+  }
+  return {
+    prims: out,
+    box,
+    fillet: Math.max(0, axes.fillet),
+    cutK: Math.max(0, axes.fillet) * 0.5,
+    attract: Math.max(0, axes.attract) * 0.8,
+    ink: axes.ink,
+    shear,
+  }
+}
+
+const cache = new Map<string, CompiledGlyph>()
+
+/** Compiles a glyph from an alphabet, cached by content. */
+export function compileGlyph(
+  char: string,
+  alphabet: Alphabet,
+  axes: Axes,
+  revision = 0,
+): CompiledGlyph {
+  const key = char + "|" + revision + "|" + JSON.stringify(axes)
+  const hit = cache.get(key)
+  if (hit) return hit
+  const prims = glyphPrims(char, alphabet) ?? []
+  const g = compilePrims(prims, axes)
+  if (cache.size > 800) cache.clear()
+  cache.set(key, g)
+  return g
+}
+
+export function clearCompileCache() {
+  cache.clear()
+}
