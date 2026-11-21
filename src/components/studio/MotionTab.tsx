@@ -9,7 +9,7 @@ import { lfoShapes, signalInfo } from "@/engine/signals"
 import { paramDef, sceneParams, warpParams, type WarpKey } from "@/engine/params"
 import type { Lfo, Motion, Scene } from "@/engine/scene"
 import { selectedLayer, useStore } from "@/state/store"
-import { nodeLabel } from "@/components/shared/labels"
+import { effectorNames, nodeLabel } from "@/components/shared/labels"
 
 const motionItems = (Object.keys(motionNames) as Motion["type"][]).map((v) => ({ value: v, label: motionNames[v] }))
 const shapeItems = (Object.keys(lfoShapes) as Lfo["shape"][]).map((v) => ({ value: v, label: lfoShapes[v] }))
@@ -27,6 +27,11 @@ function targetLabel(scene: Scene, target: string) {
   if (target.startsWith("layer:")) {
     const id = target.slice(6).split(".")[0]
     const l = scene.layers.find((x) => x.id === id)
+    const fx = target.match(/\.cloner\.effectors\.([^.]+)\./)
+    if (fx && l?.type === "group") {
+      const e = l.cloner?.effectors.find((x) => x.id === fx[1])
+      return `${nodeLabel(l)} · ${e ? effectorNames[e.kind] : "эффектор"} · ${def?.label ?? ""}`
+    }
     return `${nodeLabel(l)} · ${def?.label ?? ""}`
   }
   return def?.label ?? target

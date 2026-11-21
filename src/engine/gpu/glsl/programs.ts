@@ -1,6 +1,6 @@
 // Instance programs (cluster bodies, solo bodies, halo for corona and shadow)
 // and the full-screen post program (background underlay, grain).
-import { data, env, fold, header, noise, sdf, worldPoint } from "./common"
+import { data, env, fold, header, layerFn, maskFn, noise, sdf, worldPoint } from "./common"
 import { INSTANCE } from "../pack"
 
 /**
@@ -108,12 +108,14 @@ ${fold}
 ${worldPoint}
 ${shading}
 ${varyingsIn}
+${maskFn}
 out vec4 outColor;
 void main() {
   float px;
   vec2 world = worldAt(px);
   vec4 K0 = look(vRange.z, 0), K1 = look(vRange.z, 1), K2 = look(vRange.z, 2);
   Sample s = foldCluster(vRange.x, vRange.y, world, px, K1.z);
+  float mask = clamp(0.5 - maskField(warp(world)) / px, 0.0, 1.0);
   float d = s.d;
   // Derivatives stay in uniform control flow: outside branches and loops.
   float aa = clamp(fwidth(d), px * 0.5, px * 3.0);
@@ -121,7 +123,8 @@ void main() {
   vec2 g = world / cell;
   float l = length((g - floor(g) - 0.5) * cell);
   float aaL = max(fwidth(l), px * 0.5);
-  float a = lookAlpha(d, aa, l, aaL, cell, K0, K2, px) * vOpacity;
+  // The mask clips like an intersection of fields (min of coverages), as on the CPU.
+  float a = min(lookAlpha(d, aa, l, aaL, cell, K0, K2, px), mask) * vOpacity;
   vec3 col = lookColor(s.col, d, world, K1.y, s.ov);
   outColor = vec4(col * a, a);
 }`
@@ -137,13 +140,17 @@ ${data}
 ${noise}
 ${worldPoint}
 ${shading}
+${layerFn}
 ${varyingsIn}
+${maskFn}
 out vec4 outColor;
 void main() {
   float px;
   vec2 world = worldAt(px);
   vec4 K0 = look(vRange.z, 0), K1 = look(vRange.z, 1), K2 = look(vRange.z, 2);
-  vec2 q = mat2(vInv.xy, vInv.zw) * (warp(world) - vT.xy);
+  vec2 wp = warp(world);
+  vec2 q = mat2(vInv.xy, vInv.zw) * (wp - vT.xy);
+  float mask = clamp(0.5 - maskField(wp) / px, 0.0, 1.0);
   int gi = vRange.x;
   vec4 G0 = lay(gi, 0), G7 = lay(gi, 7);
   float sc = vT.z;
@@ -164,7 +171,7 @@ void main() {
   else a = lookAlpha(d, aa, l, aaL, cell, K0, K2, px);
   float cutCov = clamp(0.5 + P.cut * sc / px, 0.0, 1.0);
   a = max(a, min(1.0, P.lines) * cutCov);
-  a = max(a, clamp(0.5 - dOut / aaO, 0.0, 1.0)) * vOpacity;
+  a = min(max(a, clamp(0.5 - dOut / aaO, 0.0, 1.0)), mask) * vOpacity;
   vec3 col = lookColor(vColor.rgb, d, world, K1.y, 0.0);
   outColor = vec4(col * a, a);
 }`
@@ -184,6 +191,7 @@ uniform vec2 uGlow;      // intensity, size
 uniform vec3 uShadowColor;
 uniform vec2 uShadow;    // opacity, softness
 ${varyingsIn}
+${maskFn}
 out vec4 outColor;
 void main() {
   float px;
@@ -200,6 +208,8 @@ void main() {
   } else {
     d = foldCluster(vRange.x, vRange.y, world, px, K1.z).d;
   }
+  // Masked content glows and casts shadows as its visible part.
+  d = max(d, maskField(warp(world)));
   float aa = clamp(fwidth(d), px * 0.5, px * 3.0);
   if (uHaloMode == 0) {
     float g = clamp(uGlow.x * exp(-max(d, 0.0) / max(uGlow.y, 0.01)), 0.0, 1.0) * vOpacity;

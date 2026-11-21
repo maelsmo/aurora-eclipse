@@ -7,16 +7,21 @@ import { combine, type Op } from "./operators"
 import { BIG, sdBox, sdGlyph, clamp } from "./sdf"
 import { CAP } from "./grid"
 import type { Box, CompiledGlyph } from "./types"
-import type { Look, LookPatch, Material, Scene, Warp } from "./scene/types"
-import { identity, nodeXf, xfCompose, type Xf } from "./scene/tree"
+import { CLONE_LIMITS, type Cloner, type Layer, type LetterNode, type Look, type LookPatch, type Material, type Scene, type ShapeNode, type Warp } from "./scene/types"
+import { identity, nodeXf, xfApply, xfCompose, type Xf } from "./scene/tree"
+import { hash2, noise2 } from "./noise"
+import { layoutClones } from "./cloner"
+import { applyEffectors, noEffect } from "./effectors"
 import { resolveGlyphSet, type Library } from "./alphabet/sets"
 import { compileShape } from "./shapes"
 
 export type RGB = [number, number, number]
 
 export type FrameLayer = {
-  /** Source node id (picking, overlays). */
+  /** Source node id (picking, overlays): every clone of an object shares it. */
   id: string
+  /** Unique instance key of a clone (`${id}#3`); absent outside cloners. */
+  key?: string
   glyph: CompiledGlyph
   /** World placement: p = (x, y) + scale · R · diag(mirror, 1) · (q − anchor). */
   x: number
@@ -54,6 +59,8 @@ export type FrameItem = {
   layers: FrameLayer[]
   look: FrameLook
   opacity: number
+  /** Clips the item: drawn only inside this layer's shape. */
+  mask?: FrameLayer
 }
 
 export type Frame = {
@@ -122,12 +129,42 @@ export function makeFrameLayer(id: string, glyph: CompiledGlyph, world: Xf, p: L
   }
 }
 
-type Ctx = { xf: Xf; opacity: number; look: LookPatch; visible: boolean; merge: FrameItem | null }
+type Ctx = {
+  xf: Xf
+  opacity: number
+  look: LookPatch
+  merge: FrameItem | null
+  /** Mask of the nearest masking group (its bottom child). */
+  mask: FrameLayer | null
+  /** Clone path: "" outside cloners, "#3", "#3#12" in nested ones. */
+  suffix: string
+  /** Palette colour of the clone (replaces the object colour). */
+  color: string | null
+  /** Effector tint and its weight. */
+  tint: RGB | null
+  tintW: number
+}
+
+/** Layout step of a cloner: effector moves are measured in it. */
+function clonerCell(c: Cloner) {
+  switch (c.kind) {
+    case "grid":
+      return Math.max(Math.abs(c.dx), Math.abs(c.dy), 0.5)
+    case "radial":
+      return Math.max((2 * Math.PI * Math.max(c.radius, 0.5)) / Math.max(1, c.count), 0.5)
+    case "linear":
+      return Math.max(Math.hypot(c.dx, c.dy), 0.5)
+    case "scatter":
+      return Math.max(Math.sqrt((c.width * c.height) / Math.max(1, c.count)), 0.5)
+  }
+}
 
 /**
  * Resolves the scene tree for one moment. Groups compose their transforms,
  * opacity and look patches downwards (scene ← set ← groups ← object); a merge
- * group becomes one cluster item, every other object its own item.
+ * group becomes one cluster item, every other object its own item. A cloner
+ * group repeats its children along its layout (effectors on top); a masking
+ * group clips the rest of its children by its bottom child.
  */
 export function buildFrame(
   scene: Scene,
@@ -137,72 +174,139 @@ export function buildFrame(
   margin = materialReach(scene.material),
 ): Frame {
   const items: FrameItem[] = []
-  const root: Ctx = { xf: identity, opacity: 1, look: {}, visible: true, merge: null }
-  const stack: { id: string; ctx: Ctx }[] = []
+  const kids = new Map<string | undefined, Layer[]>()
   for (const n of scene.layers) {
-    while (stack.length && stack[stack.length - 1].id !== n.parent) stack.pop()
-    const parent = stack.length ? stack[stack.length - 1].ctx : root
-    const visible = parent.visible && n.visible
-    if (n.type === "group") {
-      const ctx: Ctx = {
-        xf: xfCompose(parent.xf, nodeXf(n)),
-        opacity: parent.opacity * (n.opacity ?? 1),
-        look: n.look ? { ...parent.look, ...n.look } : parent.look,
-        visible,
-        merge: null,
-      }
-      if (visible && n.mode === "merge" && !parent.merge) {
-        const look = { ...scene.look, ...ctx.look }
-        ctx.merge = { kind: "cluster", id: n.id, layers: [], look, opacity: ctx.opacity }
-        items.push(ctx.merge)
-      }
-      stack.push({ id: n.id, ctx })
-      continue
-    }
-    if (!visible) continue
-    let glyph: CompiledGlyph
-    let setLook: LookPatch | undefined
+    const list = kids.get(n.parent)
+    if (list) list.push(n)
+    else kids.set(n.parent, [n])
+  }
+  let clones = 0
+
+  // Clones of one object share its compiled glyph: compile once per node.
+  const compiled = new Map<string, { glyph: CompiledGlyph; setLook?: LookPatch } | null>()
+  const glyphOf = (n: LetterNode | ShapeNode) => {
+    let c = compiled.get(n.id)
+    if (c !== undefined) return c
     if (n.type === "letter") {
       const entry = resolveGlyphSet(lib, n.char, n.set, scene.set)
-      if (!entry) continue
-      glyph = compileGlyph(n.char, entry.alphabet, resolveAxes(scene.axes, n.axes), entry.version)
-      setLook = entry.set.look
-    } else glyph = compileShape(n.shape)
+      c = entry ? { glyph: compileGlyph(n.char, entry.alphabet, resolveAxes(scene.axes, n.axes), entry.version), setLook: entry.set.look } : null
+    } else c = { glyph: compileShape(n.shape) }
+    compiled.set(n.id, c)
+    return c
+  }
+
+  const makeLeaf = (n: LetterNode | ShapeNode, parent: Ctx): { layer: FrameLayer; look: Look } | null => {
+    const c = glyphOf(n)
+    if (!c) return null
+    const { glyph, setLook } = c
     const look: Look = { ...scene.look, ...setLook, ...parent.look, ...n.look }
-    const color = n.look?.tint ?? parent.look.tint ?? n.color
+    const color = n.look?.tint ?? parent.look.tint ?? parent.color ?? n.color
     const world = xfCompose(parent.xf, nodeXf(n))
     const host = parent.merge
     const m = Math.max(margin, lookMargin(host ? host.look : look))
     const layer = makeFrameLayer(n.id, glyph, world, { op: n.op, k: n.k, gap: n.gap, t: n.t, color }, m)
-    if (host) host.layers.push(layer)
-    else items.push({ kind: "solo", id: n.id, layers: [layer], look, opacity: parent.opacity * (n.opacity ?? 1) })
+    if (parent.suffix) layer.key = n.id + parent.suffix
+    if (parent.tint && parent.tintW > 0) {
+      const w = parent.tintW
+      for (let i = 0; i < 3; i++) layer.color[i] += (parent.tint[i] - layer.color[i]) * w
+    }
+    return { layer, look }
   }
+
+  const visit = (n: Layer, parent: Ctx) => {
+    if (!n.visible) return
+    if (n.type !== "group") {
+      const leaf = makeLeaf(n, parent)
+      if (!leaf) return
+      if (parent.merge) parent.merge.layers.push(leaf.layer)
+      else
+        items.push({
+          kind: "solo",
+          id: n.id + parent.suffix,
+          layers: [leaf.layer],
+          look: leaf.look,
+          opacity: parent.opacity * (n.opacity ?? 1),
+          mask: parent.mask ?? undefined,
+        })
+      return
+    }
+    const ctx: Ctx = {
+      ...parent,
+      xf: xfCompose(parent.xf, nodeXf(n)),
+      opacity: parent.opacity * (n.opacity ?? 1),
+      look: n.look ? { ...parent.look, ...n.look } : parent.look,
+    }
+    if (n.mode === "merge" && !parent.merge) {
+      const look = { ...scene.look, ...ctx.look }
+      ctx.merge = { kind: "cluster", id: n.id + parent.suffix, layers: [], look, opacity: ctx.opacity, mask: parent.mask ?? undefined }
+      items.push(ctx.merge)
+    }
+    let children = kids.get(n.id) ?? []
+    if (n.mode === "stack" && !ctx.merge) {
+      // The bottom child of a masking group is the mask: drawn nowhere, it clips the rest.
+      if (n.mask && children.length > 1) {
+        const m = children[0]
+        children = children.slice(1)
+        if (m.type !== "group" && m.visible) {
+          const leaf = makeLeaf(m, { ...ctx, tint: null, tintW: 0, color: null })
+          if (leaf) ctx.mask = leaf.layer
+        }
+      }
+      const c = n.cloner
+      if (c?.enabled && children.length) {
+        expand(c, children, ctx)
+        return
+      }
+    }
+    for (const k of children) visit(k, ctx)
+  }
+
+  const expand = (c: Cloner, protos: Layer[], ctx: Ctx) => {
+    const limit = Math.max(0, Math.min(CLONE_LIMITS.maxPerCloner, CLONE_LIMITS.scene - clones))
+    const list = layoutClones(c, protos.length, limit)
+    clones += list.length
+    const cell = clonerCell(c)
+    const centre: [number, number] = [ctx.xf.x, ctx.xf.y]
+    const palette = c.palette.length ? c.palette : null
+    const fx = noEffect()
+    for (const cl of list) {
+      let { x, y, rotation, scale } = cl
+      let opacity = 1,
+        tint: RGB | null = ctx.tint,
+        tintW = ctx.tintW
+      if (c.effectors.length) {
+        Object.assign(fx, noEffect())
+        applyEffectors(c.effectors, cl.index, [x, y], xfApply(ctx.xf, x, y), cell, time, centre, pointer, fx)
+        x += fx.dx
+        y += fx.dy
+        rotation += fx.rotation
+        scale *= fx.scale
+        opacity = fx.opacity
+        if (fx.tint && fx.tintW > 0) {
+          tint = hexToRgb(fx.tint)
+          tintW = fx.tintW
+        }
+      }
+      if (opacity <= 0.002) continue
+      const place = nodeXf({ x, y, scale, rotation, flipX: cl.flipX, flipY: cl.flipY })
+      visit(protos[cl.child], {
+        ...ctx,
+        xf: xfCompose(ctx.xf, place),
+        opacity: ctx.opacity * opacity,
+        suffix: ctx.suffix + "#" + cl.index,
+        color: palette ? palette[((cl.zone % palette.length) + palette.length) % palette.length] : ctx.color,
+        tint,
+        tintW,
+      })
+    }
+  }
+
+  const root: Ctx = { xf: identity, opacity: 1, look: {}, merge: null, mask: null, suffix: "", color: null, tint: null, tintW: 0 }
+  for (const n of kids.get(undefined) ?? []) visit(n, root)
   return { items: items.filter((it) => it.layers.length > 0), warp: scene.warp, time, pointer, margin }
 }
 
-/* ---------- portable noise (identical integer hash in GLSL) ---------- */
-
-export function hash2(ix: number, iy: number) {
-  let h = (Math.imul(ix | 0, 1597334673) ^ Math.imul(iy | 0, 3812015801)) >>> 0
-  h = Math.imul(h ^ (h >>> 16), 2246822519) >>> 0
-  h = Math.imul(h ^ (h >>> 13), 3266489917) >>> 0
-  h = (h ^ (h >>> 16)) >>> 0
-  return h / 4294967295
-}
-
-export function noise2(x: number, y: number) {
-  const ix = Math.floor(x),
-    iy = Math.floor(y)
-  const fx = x - ix,
-    fy = y - iy
-  const ux = fx * fx * (3 - 2 * fx),
-    uy = fy * fy * (3 - 2 * fy)
-  const a = hash2(ix, iy),
-    b = hash2(ix + 1, iy),
-    c = hash2(ix, iy + 1),
-    d = hash2(ix + 1, iy + 1)
-  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy
-}
+export { hash2, noise2 }
 
 /** World-space deformations: wave, flow noise, pointer bulge. */
 export function warpPoint(f: Frame, x: number, y: number): [number, number] {
@@ -258,7 +362,18 @@ export type Sample = {
  */
 export function sampleItem(f: Frame, item: FrameItem, x: number, y: number, px = 0.02): Sample {
   const [wx, wy] = warpPoint(f, x, y)
-  return foldLayers(item.layers, wx, wy, px, item.look.inset)
+  return foldItem(item, wx, wy, px)
+}
+
+/** Fold of an item, clipped by its mask. */
+function foldItem(item: FrameItem, wx: number, wy: number, px: number): Sample {
+  const s = foldLayers(item.layers, wx, wy, px, item.look.inset)
+  if (item.mask) {
+    const m = layerField(item.mask, wx, wy)
+    s.d = Math.max(s.d, m)
+    s.overlapD = Math.max(s.overlapD, m)
+  }
+  return s
 }
 
 function foldLayers(layers: FrameLayer[], wx: number, wy: number, px: number, inset = 0): Sample {
@@ -297,7 +412,7 @@ export function sampleFrame(f: Frame, x: number, y: number, px = 0.02): Sample {
   const [wx, wy] = warpPoint(f, x, y)
   let best: Sample = { d: BIG, color: [0, 0, 0], overlap: 0, overlapD: BIG }
   for (let k = f.items.length - 1; k >= 0; k--) {
-    const s = foldLayers(f.items[k].layers, wx, wy, px, f.items[k].look.inset)
+    const s = foldItem(f.items[k], wx, wy, px)
     if (best.d < 0) {
       best = { ...best, d: Math.min(best.d, s.d) }
       continue
@@ -311,7 +426,9 @@ export function sampleFrame(f: Frame, x: number, y: number, px = 0.02): Sample {
 export function pickLayer(f: Frame, x: number, y: number, slack = 0): string | null {
   const [wx, wy] = warpPoint(f, x, y)
   for (let k = f.items.length - 1; k >= 0; k--) {
-    const ls = f.items[k].layers
+    const it = f.items[k]
+    if (it.mask && layerField(it.mask, wx, wy) > slack) continue
+    const ls = it.layers
     for (let i = ls.length - 1; i >= 0; i--) if (layerField(ls[i], wx, wy) < slack) return ls[i].id
   }
   return null

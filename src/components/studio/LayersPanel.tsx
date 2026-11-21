@@ -9,10 +9,12 @@ import {
   Eye,
   EyeOff,
   Folder,
+  Grid3x3,
   Lock,
   LockOpen,
   Pencil,
   Plus,
+  SquareDashed,
   Trash2,
   Type,
   Ungroup,
@@ -58,7 +60,9 @@ import {
   inks,
   isGroup,
   layoutText,
+  CLONE_LIMITS,
   LIMITS,
+  defaultCloner,
   makeGroup,
   makeLayer,
   makeShape,
@@ -69,6 +73,7 @@ import {
   type ShapeKind,
 } from "@/engine/scene"
 import { sceneParams } from "@/engine/params"
+import { cloneCount } from "@/engine/cloner"
 import { sceneAlphabet, selectedIds, useStore } from "@/state/store"
 import { cn } from "@/lib/utils"
 import {
@@ -194,6 +199,7 @@ function TextForm({ onDone }: { onDone: () => void }) {
 
 function AddMenu() {
   const scene = useStore((s) => s.scene)
+  const sets = useStore((s) => s.sets)
   const selected = useStore(useShallow(selectedIds))
   const [panel, setPanel] = useState<"letter" | "text" | null>(null)
   const [pickSet, setPickSet] = useState<string | null>(null)
@@ -217,6 +223,29 @@ function AddMenu() {
     const set = pickSet ?? scene.set
     insert(makeLayer(c, { ...near(), op: "fuse", ...(set !== scene.set ? { set } : {}) }))
     setPanel(null)
+  }
+  /** A cloner group with one pattern tile of the geometric set: a ready grid to tweak. */
+  function addCloner() {
+    if (scene.layers.length + 2 > LIMITS.nodes) return void toast.error(`В сцене не больше ${LIMITS.nodes} объектов.`)
+    const n = near()
+    const g = makeGroup("stack", {
+      name: "Клонер",
+      x: n.x,
+      y: n.y,
+      cloner: { ...defaultCloner, cols: 8, rows: 8, dx: 2.5, dy: 2.5, symmetry: "rotate", pick: "cycle" },
+    })
+    const geo = sets.some((x) => x.id === "geo") ? "geo" : undefined
+    const tile = { ...makeLayer("◜", { x: 0, y: 0, color: n.color, ...(geo && geo !== scene.set ? { set: geo } : {}) }), parent: g.id }
+    const { parent, index } = insertionPoint(scene, selected)
+    const host = parent ? scene.layers.find((l) => l.id === parent) : undefined
+    const p = isGroup(host) && host.mode === "merge" ? host.parent : parent
+    const idx = p === parent ? index : childrenOf(scene.layers, p).length
+    setScene((s) => {
+      const moved = moveNode({ ...s, layers: [...s.layers, g] }, g.id, p, idx)
+      const at = moved.layers.findIndex((l) => l.id === g.id)
+      return { ...moved, layers: [...moved.layers.slice(0, at + 1), tile, ...moved.layers.slice(at + 1)] }
+    })
+    select(g.id)
   }
   function addShape(kind: ShapeKind) {
     const n = near()
@@ -263,10 +292,14 @@ function AddMenu() {
             <Combine />
             Пустой сплав
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={addCloner}>
+            <Grid3x3 />
+            Клонер плиток
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       {/* The popover hangs from the header, under the add button. */}
-      <PopoverTrigger render={<span aria-hidden className="pointer-events-none absolute top-11 right-3 size-0" />} />
+      <PopoverTrigger nativeButton={false} render={<span aria-hidden className="pointer-events-none absolute top-11 right-3 size-0" />} />
       <PopoverContent className="w-80" align="end">
         {panel === "letter" && <GlyphPicker set={pickSet ?? scene.set} onSet={setPickSet} onPick={addLetter} />}
         {panel === "text" && <TextForm onDone={() => setPanel(null)} />}
@@ -307,10 +340,18 @@ function LayerRow({
   const setLabel = useStore((s) => (l.type === "letter" && l.set && l.set !== s.scene.set ? s.sets.find((x) => x.id === l.set)?.name : undefined))
   useEffect(() => setName(nodeLabel(l)), [renaming, l])
 
+  const maskHost = scene.layers.find((g) => g.id === l.parent)
+  const isMask = isGroup(maskHost) && maskHost.mode === "stack" && !!maskHost.mask && childrenOf(scene.layers, maskHost.id)[0]?.id === l.id
   const sub =
     l.type === "group"
-      ? `${l.mode === "merge" ? "Сплав" : "Группа"} · ${kids}`
-      : role === "base"
+      ? l.mode === "merge"
+        ? `Сплав · ${kids}`
+        : l.cloner?.enabled
+          ? `Клонер · ${Math.min(cloneCount(l.cloner), CLONE_LIMITS.maxPerCloner)}${l.mask ? " · маска" : ""}`
+          : `${l.mask ? "Маска" : "Группа"} · ${kids}`
+      : isMask
+        ? "Маска группы"
+        : role === "base"
         ? "Основа сплава"
         : role === "operand"
           ? opInfo[l.op].name
@@ -389,6 +430,10 @@ function LayerRow({
               <ShapeIcon kind={l.shape.kind} className="size-4" style={{ color: l.color }} />
             ) : l.mode === "merge" ? (
               <Combine className="size-4 text-muted-foreground" />
+            ) : l.cloner?.enabled ? (
+              <Grid3x3 className="size-4 text-muted-foreground" />
+            ) : l.mask ? (
+              <SquareDashed className="size-4 text-muted-foreground" />
             ) : (
               <Folder className="size-4 text-muted-foreground" />
             )}

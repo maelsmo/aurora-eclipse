@@ -412,6 +412,8 @@ export function compileGlyph(
   }
   const prims = glyphPrims(char, alphabet) ?? []
   const g = compilePrims(prims, axes)
+  const anchor = alphabet[char]?.anchor
+  if (anchor) g.anchor = anchor
   if (cache.size >= CACHE_SIZE) cache.delete(cache.keys().next().value!)
   cache.set(key, g)
   return g

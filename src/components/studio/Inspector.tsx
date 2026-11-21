@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { isGroup, mergeParent } from "@/engine/scene"
 import { selectedIds, useStore } from "@/state/store"
+import { ClonerTab } from "./ClonerTab"
 import { CombineTab } from "./CombineTab"
 import { MotionTab } from "./MotionTab"
 import { MaterialTab } from "./MaterialTab"
@@ -35,6 +36,7 @@ export function Inspector() {
           { value: "object", label: "Объект", Body: ObjectTab },
           { value: "look", label: "Вид", Body: LookTab },
           ...(kind === "in-merge" || kind === "merge" ? [{ value: "combine", label: "Сочетание", Body: CombineTab }] : []),
+          ...(kind === "group" && ids.length === 1 ? [{ value: "cloner", label: "Клонер", Body: ClonerTab }] : []),
           { value: "motion", label: "Движение", Body: () => <MotionTab scope="object" /> },
         ]
   const [tab, setTab] = useState(tabs[0].value)

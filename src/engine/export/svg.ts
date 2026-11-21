@@ -158,7 +158,7 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
     }
     if (parts.length) {
       const op = it.opacity < 1 ? ` opacity="${+it.opacity.toFixed(3)}"` : ""
-      groups.push(`<g id="${uidPrefix}${it.id}"${op}>${parts.join("")}</g>`)
+      groups.push(`<g id="${uidPrefix}${it.id.replace(/#/g, "-")}"${op}>${parts.join("")}</g>`)
     }
   })
   onProgress?.(1)

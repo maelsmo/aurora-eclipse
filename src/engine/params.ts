@@ -1,8 +1,10 @@
 // Registry of every numeric parameter: labels, ranges and modulation targets.
 // A target is a path: "axes.weight", "look.line", "layer:<id>.x",
-// "layer:<id>.look.line", "layer:<id>.shape.w"… parseTarget() splits it.
+// "layer:<id>.look.line", "layer:<id>.shape.w", "layer:<id>.cloner.dx",
+// "layer:<id>.cloner.effectors.<effector id>.amount"… parseTarget() splits it.
+// Inside arrays a path segment names the element by its id.
 import type { AxisKey } from "./axes"
-import type { Layer, Look, Material, Scene, ShapeDef, Warp } from "./scene/types"
+import type { Cloner, Effector, Layer, Look, Material, Scene, ShapeDef, Warp } from "./scene/types"
 
 export type ParamDef = {
   label: string
@@ -92,6 +94,38 @@ export const shapeParams: Record<ShapeNumKey, ParamDef> = {
   hole: { label: "Отверстие", min: 0, max: 0.95, step: 0.01 },
 }
 
+export type ClonerNumKey = NumKeys<Cloner>
+export type EffectorNumKey = NumKeys<Effector>
+
+export const clonerParams: Record<ClonerNumKey, ParamDef> = {
+  cols: { label: "Колонки", min: 1, max: 64, step: 1 },
+  rows: { label: "Ряды", min: 1, max: 64, step: 1 },
+  dx: { label: "Шаг X", min: -20, max: 20, step: 0.05, unit: "m" },
+  dy: { label: "Шаг Y", min: -20, max: 20, step: 0.05, unit: "m" },
+  count: { label: "Количество", min: 1, max: 256, step: 1 },
+  radius: { label: "Радиус", min: 0, max: 40, step: 0.05, unit: "m" },
+  rings: { label: "Кольца", min: 1, max: 16, step: 1 },
+  ringStep: { label: "Шаг колец", min: 0.5, max: 20, step: 0.05, unit: "m" },
+  stepRotation: { label: "Поворот за шаг", min: -180, max: 180, step: 0.5, unit: "°", mode: "offset" },
+  stepScale: { label: "Масштаб за шаг", min: 0.8, max: 1.25, step: 0.005 },
+  width: { label: "Ширина области", min: 1, max: 120, step: 0.5, unit: "m" },
+  height: { label: "Высота области", min: 1, max: 120, step: 0.5, unit: "m" },
+  seed: { label: "Зерно случая", min: 1, max: 999, step: 1 },
+}
+
+export const effectorParams: Record<EffectorNumKey, ParamDef> = {
+  amount: { label: "Сила", min: 0, max: 1, step: 0.01 },
+  position: { label: "Сдвиг", min: 0, max: 2, step: 0.01, hint: "В шагах раскладки" },
+  rotation: { label: "Поворот", min: 0, max: 1, step: 0.01, hint: "1 — до 180°" },
+  scale: { label: "Масштаб", min: -1, max: 1, step: 0.01 },
+  opacity: { label: "Исчезание", min: 0, max: 1, step: 0.01 },
+  color: { label: "Перекраска", min: 0, max: 1, step: 0.01 },
+  freq: { label: "Частота", min: 0.01, max: 1, step: 0.005 },
+  speed: { label: "Скорость", min: 0, max: 3, step: 0.01 },
+  radius: { label: "Радиус поля", min: 0.5, max: 40, step: 0.1, unit: "m" },
+  seed: { label: "Зерно случая", min: 1, max: 999, step: 1 },
+}
+
 export const sceneParams = {
   speed: { label: "Темп времени", min: 0, max: 3, step: 0.01 } as ParamDef,
   tracking: { label: "Трекинг", min: -3, max: 3, step: 0.05, unit: "m" } as ParamDef,
@@ -135,6 +169,7 @@ export function paramDef(target: string): ParamDef | undefined {
       if (a === "look") return lookParams[b as LookNumKey]
       if (a === "shape") return shapeParams[b as ShapeNumKey]
       if (a === "axes") return axisParams[b as AxisKey]
+      if (a === "cloner") return b === "effectors" ? effectorParams[t.path[3] as EffectorNumKey] : clonerParams[b as ClonerNumKey]
       return undefined
   }
 }
@@ -144,15 +179,22 @@ export function readPath(obj: unknown, path: string[]): number | undefined {
   let v: unknown = obj
   for (const k of path) {
     if (!v || typeof v !== "object") return undefined
-    v = (v as Record<string, unknown>)[k]
+    v = Array.isArray(v) ? v.find((e) => e?.id === k) : (v as Record<string, unknown>)[k]
   }
   return typeof v === "number" ? v : undefined
 }
 
-/** Returns a copy of `obj` with the number at `path` replaced (copies only along the path). */
+/**
+ * Returns a copy of `obj` with the number at `path` replaced (copies only
+ * along the path). Array elements are found by id; a missing one is left as is.
+ */
 export function writePath<T>(obj: T, path: string[], value: number): T {
   if (!path.length) return obj
   const [k, ...rest] = path
+  if (Array.isArray(obj)) {
+    if (!rest.length || !obj.some((e) => e?.id === k)) return obj
+    return obj.map((e) => (e?.id === k ? writePath(e, rest, value) : e)) as T
+  }
   const src = (obj ?? {}) as Record<string, unknown>
   return { ...src, [k]: rest.length ? writePath(src[k], rest, value) : value } as T
 }

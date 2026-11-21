@@ -121,16 +121,19 @@ export const geoCyrillic: Alphabet = {
   Я: { adv: 5, prims: [cell(0, 1, ["tl"]), cell(1, 1), cell(0, 0, ["tl"]), cell(1, 0), vs(2.5, 3, 4.5), hs(2.5, -OUT, 2.5)] },
 }
 
+/** Tiles turn and mirror about their own centre, so rosettes stay seamless. */
+const TILE_C: [number, number] = [1.25, 1.25]
+
 /** Pattern tiles: single cells to build grids and rosettes with cloners. */
 export const geoTiles: Alphabet = {
-  "■": { adv: 2.5, prims: [cell(0, 0, [], "h")] },
-  "◜": { adv: 2.5, prims: [cell(0, 0, ["tl"])] },
-  "◠": { adv: 2.5, prims: [bar(0, 0, 2.5, 2.5, [1.25, 1.25, 0, 0])] },
-  "●": { adv: 2.5, prims: [bar(0, 0, 2.5, 2.5, [1.25, 1.25, 1.25, 1.25])] },
-  "◆": { adv: 2.5, prims: [cell(0, 0, ["tl", "br"])] },
-  "◉": { adv: 2.5, prims: [{ kind: "sector", c: [1.25, 1.25], r: 1.25, r0: 0.55, a0: 0, a1: 360, dir: "arc" } satisfies SectorDef] },
-  "◢": { adv: 2.5, prims: [P([0, 0], [2.5, 0], [2.5, 2.5])] },
-  "▤": { adv: 2.5, prims: [{ ...cell(0, 0, [], "h"), mode: "lines" }] },
+  "■": { adv: 2.5, anchor: TILE_C, prims: [cell(0, 0, [], "h")] },
+  "◜": { adv: 2.5, anchor: TILE_C, prims: [cell(0, 0, ["tl"])] },
+  "◠": { adv: 2.5, anchor: TILE_C, prims: [bar(0, 0, 2.5, 2.5, [1.25, 1.25, 0, 0])] },
+  "●": { adv: 2.5, anchor: TILE_C, prims: [bar(0, 0, 2.5, 2.5, [1.25, 1.25, 1.25, 1.25])] },
+  "◆": { adv: 2.5, anchor: TILE_C, prims: [cell(0, 0, ["tl", "br"])] },
+  "◉": { adv: 2.5, anchor: TILE_C, prims: [{ kind: "sector", c: [1.25, 1.25], r: 1.25, r0: 0.55, a0: 0, a1: 360, dir: "arc" } satisfies SectorDef] },
+  "◢": { adv: 2.5, anchor: TILE_C, prims: [P([0, 0], [2.5, 0], [2.5, 2.5])] },
+  "▤": { adv: 2.5, anchor: TILE_C, prims: [{ ...cell(0, 0, [], "h"), mode: "lines" }] },
 }
 export const geoTileOrder = Object.keys(geoTiles).join("")
 

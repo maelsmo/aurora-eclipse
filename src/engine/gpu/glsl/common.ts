@@ -333,7 +333,7 @@ vec2 warp(vec2 p) {
  * Fold of a cluster: layers [start, start + count) combined bottom-up.
  * Define WANT_COLOR before this chunk to also track colour and overlap.
  */
-export const fold = `
+export const layerFn = `
 float layerField(int i, vec2 w, float inset) {
   vec4 L0 = lay(i, 0), L1 = lay(i, 1), L2 = lay(i, 2), L6 = lay(i, 6);
   vec2 d = w - L1.xy;
@@ -345,7 +345,17 @@ float layerField(int i, vec2 w, float inset) {
   vec4 L7 = lay(i, 7);
   return glyphField(ivec4(int(L0.x + 0.5), int(L0.y + 0.5), int(L7.y + 0.5), int(L7.z + 0.5)), lp, lay(i, 3), L2.w, inset) * L2.x;
 }
+`
 
+/** Field of the instance mask (iE.w = layer record + 1); 0 means no mask. */
+export const maskFn = `
+float maskField(vec2 w) {
+  if (vColor.w < 0.5) return -BIG;
+  return layerField(int(vColor.w - 0.5), w, 0.0);
+}
+`
+
+export const fold = layerFn + `
 float front(float acc, float b, float aa) { return clamp(0.5 + 0.5 * (acc - b) / aa, 0.0, 1.0); }
 
 struct Sample { float d; vec3 col; float ov; };

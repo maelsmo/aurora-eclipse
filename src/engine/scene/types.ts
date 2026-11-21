@@ -243,11 +243,119 @@ export type ShapeNode = NodeBase & {
 
 export type GroupMode = "stack" | "merge"
 
+/* ---------- cloners ---------- */
+
+export type ClonerKind = "grid" | "radial" | "linear" | "scatter"
+/** Which child a clone shows: in turn, at random, or by zones of the layout (Tinkuy-like maps). */
+export type ClonerPick = "cycle" | "random" | "rows" | "cols" | "rings" | "diamond" | "diagonal" | "checker"
+/** Kaleidoscope: clones flip (mirror) or turn (rotate) by quadrant around the centre. */
+export type ClonerSymmetry = "none" | "mirror" | "rotate"
+
+export type EffectorKind = "random" | "noise" | "wave" | "field"
+
+export type Effector = {
+  id: string
+  kind: EffectorKind
+  enabled: boolean
+  /** Overall strength, 0…1. */
+  amount: number
+  /** What it moves: position (× cell), rotation (× 180°), scale, opacity, colour mix. */
+  position: number
+  rotation: number
+  scale: number
+  opacity: number
+  color: number
+  tint: string
+  /** Spatial frequency (noise, wave) and speed in Hz. */
+  freq: number
+  speed: number
+  /** Field: radius in modules, around the pointer or the cloner centre. */
+  radius: number
+  source: "pointer" | "centre"
+  seed: number
+}
+
+export type Cloner = {
+  enabled: boolean
+  kind: ClonerKind
+  /** Grid: columns × rows with steps dx, dy (modules); linear: `count` steps of (dx, dy). */
+  cols: number
+  rows: number
+  dx: number
+  dy: number
+  /** Radial / linear / scatter: number of clones; radial: radius, rings and ring step. */
+  count: number
+  radius: number
+  rings: number
+  ringStep: number
+  /** Radial: clones turn to face outwards. */
+  align: boolean
+  /** Linear: rotation and scale change per step. */
+  stepRotation: number
+  stepScale: number
+  /** Scatter: area size. */
+  width: number
+  height: number
+  pick: ClonerPick
+  symmetry: ClonerSymmetry
+  /** Zones also pick colours from the palette (empty: the child's own colour). */
+  palette: string[]
+  seed: number
+  effectors: Effector[]
+}
+
+export const defaultCloner: Cloner = {
+  enabled: true,
+  kind: "grid",
+  cols: 8,
+  rows: 8,
+  dx: 2.5,
+  dy: 2.5,
+  count: 12,
+  radius: 6,
+  rings: 1,
+  ringStep: 3,
+  align: true,
+  stepRotation: 0,
+  stepScale: 1,
+  width: 30,
+  height: 18,
+  pick: "cycle",
+  symmetry: "none",
+  palette: [],
+  seed: 1,
+  effectors: [],
+}
+
+export const defaultEffector: Omit<Effector, "id"> = {
+  kind: "noise",
+  enabled: true,
+  amount: 0.5,
+  position: 0,
+  rotation: 0.5,
+  scale: 0,
+  opacity: 0,
+  color: 0,
+  tint: "#F2542D",
+  freq: 0.15,
+  speed: 0.2,
+  radius: 6,
+  source: "pointer",
+  seed: 1,
+}
+
+/** Clones a cloner may make by default / at most; instances per scene. */
+export const CLONE_LIMITS = { perCloner: 1024, maxPerCloner: 4096, scene: 4096 }
+
 export type GroupNode = NodeBase & {
   type: "group"
   /** stack: children are drawn independently; merge: they fold into one form with operators. */
   mode: GroupMode
   collapsed?: boolean
+  /** Repeats the children in a layout (stack groups). */
+  cloner?: Cloner
+  /** The bottom child is not drawn: it masks everything else in the group. */
+  mask?: boolean
 }
 
 export type Layer = LetterNode | ShapeNode | GroupNode

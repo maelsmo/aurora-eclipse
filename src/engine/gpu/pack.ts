@@ -183,7 +183,7 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
   const glyphs: CompiledGlyph[] = []
   let pi = 0
   for (const item of frame.items)
-    for (const l of item.layers) {
+    for (const l of item.mask ? [...item.layers, item.mask] : item.layers) {
       if (ranges.has(l.glyph)) continue
       const count = Math.min(l.glyph.prims.length, MAX_GLYPH_PRIMS, MAX_PRIMS - pi)
       const tiles = Math.min(l.glyph.tiles?.length ?? 0, MAX_GLYPH_PRIMS, MAX_PRIMS - pi - count)
@@ -225,6 +225,19 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
       row * LAYER_TEXELS * 4,
     )
   }
+  /** Mask records (layer texture rows), one per masking layer. */
+  const maskRows = new Map<FrameItem["layers"][number], number>()
+  const maskOf = (item: FrameItem) => {
+    if (!item.mask) return 0
+    let row = maskRows.get(item.mask)
+    if (row === undefined) {
+      if (li >= MAX_LAYERS) return 0
+      row = li++
+      maskRows.set(item.mask, row)
+      writeLayer(item.mask, row)
+    }
+    return row + 1
+  }
   const wr = warpReach(frame.warp)
   for (const item of frame.items) {
     if (ii >= MAX_INSTANCES) break
@@ -238,6 +251,7 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
       K.fill(0, o, o + LOOK_TEXELS * 4)
       K.set([FILL[lk.mode], lk.line, lk.spacing, lk.rings, lk.dot, COLOR_MODE[lk.colorMode], lk.inset, 0, lk.stripes, lk.stripeFill, lk.lineDir ? LINE_DIR[lk.lineDir] : 0, 0], o)
     }
+    const mask = maskOf(item)
     if (item.kind === "solo") {
       const l = item.layers[0]
       let row = glyphRows.get(l.glyph)
@@ -263,7 +277,7 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
           tx, ty, item.opacity, look ?? 0,
           row, 0, INSTANCE.solo, s,
           g.x0 - pad, g.y0 - pad, g.x1 + pad, g.y1 + pad,
-          l.color[0], l.color[1], l.color[2], 0,
+          l.color[0], l.color[1], l.color[2], mask,
         ],
         ii * INSTANCE_FLOATS,
       )
@@ -282,7 +296,7 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
         0, 0, item.opacity, look ?? 0,
         start, li - start, INSTANCE.cluster, 1,
         box.x0, box.y0, box.x1, box.y1,
-        0, 0, 0, 0,
+        0, 0, 0, mask,
       ],
       ii * INSTANCE_FLOATS,
     )

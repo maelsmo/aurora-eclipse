@@ -8,6 +8,11 @@ import { axisParams } from "../params"
 import { migrateScene } from "./migrate"
 import { normalize } from "./tree"
 import {
+  CLONE_LIMITS,
+  defaultCloner,
+  defaultEffector,
+  type Cloner,
+  type Effector,
   defaultArtboard,
   defaultLfo,
   defaultLook,
@@ -234,7 +239,58 @@ function sanitizeNode(raw: unknown, ctx: SanitizeContext): Layer | null {
   g.type = "group"
   g.mode = raw.mode === "merge" ? "merge" : "stack"
   if (raw.collapsed === true) g.collapsed = true
+  if (raw.mask === true) g.mask = true
+  if (isObj(raw.cloner) && g.mode === "stack") g.cloner = sanitizeCloner(raw.cloner)
   return g
+}
+
+export function sanitizeEffector(raw: unknown): Effector | null {
+  if (!isObj(raw)) return null
+  const d = defaultEffector
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id.slice(0, 32) : uid(),
+    kind: oneOf(raw.kind, ["random", "noise", "wave", "field"] as const, d.kind),
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : true,
+    amount: num(raw.amount, d.amount, 0, 1),
+    position: num(raw.position, d.position, -4, 4),
+    rotation: num(raw.rotation, d.rotation, -4, 4),
+    scale: num(raw.scale, d.scale, -4, 4),
+    opacity: num(raw.opacity, d.opacity, 0, 1),
+    color: num(raw.color, d.color, 0, 1),
+    tint: color(raw.tint, d.tint),
+    freq: num(raw.freq, d.freq, 0.001, 5),
+    speed: num(raw.speed, d.speed, -10, 10),
+    radius: num(raw.radius, d.radius, 0.1, 200),
+    source: raw.source === "centre" ? "centre" : "pointer",
+    seed: Math.round(num(raw.seed, d.seed, 0, 1e6)),
+  }
+}
+
+export function sanitizeCloner(raw: unknown): Cloner {
+  const d = defaultCloner
+  if (!isObj(raw)) return { ...d, effectors: [] }
+  return {
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : true,
+    kind: oneOf(raw.kind, ["grid", "radial", "linear", "scatter"] as const, d.kind),
+    cols: Math.round(num(raw.cols, d.cols, 1, 128)),
+    rows: Math.round(num(raw.rows, d.rows, 1, 128)),
+    dx: num(raw.dx, d.dx, -100, 100),
+    dy: num(raw.dy, d.dy, -100, 100),
+    count: Math.round(num(raw.count, d.count, 1, CLONE_LIMITS.maxPerCloner)),
+    radius: num(raw.radius, d.radius, 0, 200),
+    rings: Math.round(num(raw.rings, d.rings, 1, 64)),
+    ringStep: num(raw.ringStep, d.ringStep, 0, 100),
+    align: typeof raw.align === "boolean" ? raw.align : d.align,
+    stepRotation: num(raw.stepRotation, d.stepRotation, -360, 360),
+    stepScale: num(raw.stepScale, d.stepScale, 0.5, 2),
+    width: num(raw.width, d.width, 0.5, 400),
+    height: num(raw.height, d.height, 0.5, 400),
+    pick: oneOf(raw.pick, ["cycle", "random", "rows", "cols", "rings", "diamond", "diagonal", "checker"] as const, d.pick),
+    symmetry: oneOf(raw.symmetry, ["none", "mirror", "rotate"] as const, d.symmetry),
+    palette: Array.isArray(raw.palette) ? raw.palette.filter(isColor).slice(0, 12) : [],
+    seed: Math.round(num(raw.seed, d.seed, 0, 1e6)),
+    effectors: Array.isArray(raw.effectors) ? raw.effectors.map(sanitizeEffector).filter((e): e is Effector => !!e).slice(0, 8) : [],
+  }
 }
 
 function sanitizeRoute(raw: unknown): Route | null {

@@ -69,14 +69,24 @@ export function drillTarget(layers: Layer[], leaf: string, current: string | und
   return path[Math.min(k + 1, path.length - 1)]
 }
 
-function leavesOf(layers: Layer[], id: string, all: Map<string, FrameLayer>): FrameLayer[] {
-  const out: FrameLayer[] = []
-  const self = all.get(id)
-  if (self) out.push(self)
-  for (const l of layers) if (isDescendant(layers, l, id)) {
-    const fl = all.get(l.id)
-    if (fl) out.push(fl)
+/** Frame layers by source node: every clone of an object, and masks (drawn nowhere, still selectable). */
+function layersById(f: Frame) {
+  const all = new Map<string, FrameLayer[]>()
+  const add = (l: FrameLayer) => {
+    const list = all.get(l.id)
+    if (!list) all.set(l.id, [l])
+    else if (!list.includes(l)) list.push(l)
   }
+  for (const it of f.items) {
+    for (const l of it.layers) add(l)
+    if (it.mask) add(it.mask)
+  }
+  return all
+}
+
+function leavesOf(layers: Layer[], id: string, all: Map<string, FrameLayer[]>): FrameLayer[] {
+  const out: FrameLayer[] = [...(all.get(id) ?? [])]
+  for (const l of layers) if (isDescendant(layers, l, id)) out.push(...(all.get(l.id) ?? []))
   return out
 }
 
@@ -92,9 +102,10 @@ export type Gizmo = {
 /** Selection box: oriented around a single leaf, axis-aligned for groups and several nodes. */
 export function selectionGizmo(f: Frame, layers: Layer[], ids: string[]): Gizmo | null {
   if (!ids.length) return null
-  const all = new Map(frameLayers(f).map((l) => [l.id, l]))
-  if (ids.length === 1 && all.has(ids[0])) {
-    const l = all.get(ids[0])!
+  const all = layersById(f)
+  // A single object drawn once: a box along its own axes.
+  if (ids.length === 1 && all.get(ids[0])?.length === 1) {
+    const l = all.get(ids[0])![0]
     const g = l.glyph.box
     const q = [layerToWorld(l, g.x0, g.y0), layerToWorld(l, g.x1, g.y0), layerToWorld(l, g.x1, g.y1), layerToWorld(l, g.x0, g.y1)] as Gizmo["quad"]
     const node = layers.find((n) => n.id === ids[0])
@@ -116,7 +127,7 @@ export function selectionGizmo(f: Frame, layers: Layer[], ids: string[]): Gizmo 
 
 /** World bounds of a node (for marquee selection). */
 export function nodeBounds(f: Frame, layers: Layer[], id: string): Box | null {
-  const all = new Map(frameLayers(f).map((l) => [l.id, l]))
+  const all = layersById(f)
   const b: Box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }
   for (const fl of leavesOf(layers, id, all)) {
     const lb = layerBounds(fl)

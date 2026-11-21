@@ -90,6 +90,12 @@ export function isAnimated(scene: Scene, pointerOn: boolean, micOn: boolean) {
     w.flow > 0 ||
     (pointerOn && w.pointer !== 0) ||
     (aurora && m.auroraSpeed > 0) ||
+    scene.layers.some(
+      (l) =>
+        l.type === "group" &&
+        l.cloner?.enabled &&
+        l.cloner.effectors.some((e) => e.enabled && e.amount > 0 && (e.kind === "noise" || e.kind === "wave" ? e.speed > 0 : e.kind === "field" && e.source === "pointer" && pointerOn)),
+    ) ||
     m.grain > 0 ||
     micOn
   )

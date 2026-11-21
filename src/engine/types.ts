@@ -91,6 +91,8 @@ export type GlyphDef = {
   prims: PrimDef[]
   /** Optional base glyph whose modules are drawn first (Ё = E + satellites). */
   base?: string
+  /** Rotation and placement centre; letters use the middle of the cap height. */
+  anchor?: Vec
 }
 
 export type Alphabet = Record<string, GlyphDef>

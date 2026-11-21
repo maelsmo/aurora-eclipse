@@ -1,4 +1,4 @@
-import type { Layer, ShapeKind } from "@/engine/scene"
+import type { ClonerPick, EffectorKind, Layer, ShapeKind } from "@/engine/scene"
 
 export const shapeNames: Record<ShapeKind, string> = {
   rect: "Прямоугольник",
@@ -19,3 +19,18 @@ export function nodeLabel(n: Layer | null | undefined): string {
 
 /** Letters of a scene as a string (file names, default titles). */
 export const sceneChars = (layers: Layer[]) => layers.map((l) => (l.type === "letter" ? l.char : "")).join("")
+
+/** Zone rules of cloners. */
+export const pickNames: Record<ClonerPick, string> = {
+  cycle: "По порядку",
+  random: "Случайно",
+  rows: "По рядам",
+  cols: "По колонкам",
+  rings: "Кольцами",
+  diamond: "Ромбами",
+  diagonal: "Диагоналями",
+  checker: "Шахматкой",
+}
+
+/** Effector kinds. */
+export const effectorNames: Record<EffectorKind, string> = { random: "Случайность", noise: "Шум", wave: "Волна", field: "Поле" }

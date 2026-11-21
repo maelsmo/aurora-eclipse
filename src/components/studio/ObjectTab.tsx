@@ -121,6 +121,15 @@ export function ObjectTab() {
                 ? "Формы сливаются операторами вкладки «Сочетание»: нижняя — основа, каждая следующая сочетается со всем, что под ней."
                 : "Каждый объект рисуется сам по себе, со своим видом; группа задаёт общий сдвиг, поворот, масштаб и вид."}
             </Hint>
+            {group.mode === "stack" && (
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="group-mask" className="flex flex-col items-start gap-0.5 text-sm font-normal">
+                  Маска
+                  <span className="text-xs text-muted-foreground">Нижний объект обрезает остальные и сам не рисуется</span>
+                </Label>
+                <Switch id="group-mask" checked={!!group.mask} onCheckedChange={(v) => updateLayer(group.id, { mask: v || undefined })} />
+              </div>
+            )}
           </div>
         )}
       </Section>
