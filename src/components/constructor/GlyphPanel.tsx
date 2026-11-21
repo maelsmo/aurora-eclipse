@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ParamSlider } from "@/components/shared/ParamSlider"
 import { Section, Hint } from "@/components/shared/Section"
-import { SceneThumb } from "@/components/shared/Thumbs"
+import { SceneThumb, useThemeInk } from "@/components/shared/Thumbs"
 import { defaultAlphabet, sharedBy } from "@/engine/alphabet"
 import { glyphAdvance } from "@/engine/compile"
 import { layoutText, makeScene } from "@/engine/scene"
@@ -65,15 +65,16 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
   const [name, setName] = useState("")
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  const ink = useThemeInk()
   const control = useMemo(
     () =>
       makeScene({
         axes,
         set: alphabetId,
-        layers: layoutText(`H${editing}HO${editing}O`, alphabet, axes, 0.5, { color: "#161616" }, library.sets[alphabetId]?.version ?? 0),
+        layers: layoutText(`H${editing}HO${editing}O`, alphabet, axes, 0.5, { color: ink }, library.sets[alphabetId]?.version ?? 0),
         material: { ...makeScene().material, transparent: true },
       }),
-    [editing, alphabet, axes, library, alphabetId],
+    [editing, alphabet, axes, library, alphabetId, ink],
   )
 
   const setPrim = (p: PrimDef, key: string) => {

@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Studio } from "@/components/studio/Studio"
 import { Constructor } from "@/components/constructor/Constructor"
 import { Collection } from "@/components/collection/Collection"
-import { SceneThumb } from "@/components/shared/Thumbs"
+import { SceneThumb, useThemeInk } from "@/components/shared/Thumbs"
 import { SaveDialog, ExportDialog } from "@/components/shared/Dialogs"
 import { AboutDialog } from "@/components/shared/AboutDialog"
 import { presets } from "@/engine/presets"
@@ -17,10 +17,12 @@ import { selectedIds, useStore, type Tab } from "@/state/store"
 import { arrange, deleteSelection, duplicateSelection, groupSelection, selectAll, toggleFlag, ungroupSelection } from "@/components/studio/actions"
 
 function Brand() {
+  // The mark is drawn in the theme's ink, so it reads on light and dark headers.
+  const ink = useThemeInk()
   const mark = useMemo(() => {
     const s = presets[0].make()
-    return { ...s, material: { ...s.material, transparent: true } }
-  }, [])
+    return { ...s, material: { ...s.material, transparent: true }, layers: s.layers.map((l) => ({ ...l, color: ink })) }
+  }, [ink])
   return (
     <div className="flex items-center gap-2.5">
       <span className="size-9 shrink-0">

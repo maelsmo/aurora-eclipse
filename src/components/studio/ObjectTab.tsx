@@ -68,7 +68,16 @@ export function ObjectTab() {
         {letter && (
           <div className="flex items-center gap-2">
             <Popover open={picking} onOpenChange={setPicking}>
-              <PopoverTrigger render={<Button variant="outline" className="h-12 w-12 p-1" aria-label={"Буква " + letter.char + ", заменить"} />}>
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    className="h-12 w-12 p-1"
+                    style={scene.material.transparent ? undefined : { background: scene.material.background }}
+                    aria-label={"Буква " + letter.char + ", заменить"}
+                  />
+                }
+              >
                 <GlyphThumb char={letter.char} set={letter.set} color={letter.color} />
               </PopoverTrigger>
               <PopoverContent className="w-80" align="start">

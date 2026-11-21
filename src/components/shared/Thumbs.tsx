@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { drawScene, type ThumbOptions } from "@/engine/gpu/thumbs"
 import { fitView } from "@/engine/view"
 import type { Frame } from "@/engine/frame"
@@ -56,12 +56,24 @@ export function SceneThumb({
 
 const glyphScenes = new Map<string, Scene>()
 
+/** Ink of glyphs drawn without a colour of their own: the theme's text colour. */
+export function useThemeInk() {
+  const read = () => (typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#EDEDED" : "#161616")
+  const [ink, setInk] = useState(read)
+  useEffect(() => {
+    const mo = new MutationObserver(() => setInk(read()))
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+    return () => mo.disconnect()
+  }, [])
+  return ink
+}
+
 export function GlyphThumb({
   char,
   axes,
   set,
   look,
-  color = "#161616",
+  color: own,
   className,
 }: {
   char: string
@@ -72,6 +84,8 @@ export function GlyphThumb({
   color?: string
   className?: string
 }) {
+  const ink = useThemeInk()
+  const color = own ?? ink
   const globalAxes = useStore((s) => s.scene.axes)
   const sceneSet = useStore((s) => s.scene.set)
   const ax = axes ?? globalAxes

@@ -6,6 +6,12 @@ import { runtime } from "./state/runtime"
 import * as presets from "./engine/presets"
 import "./index.css"
 
+// The interface follows the system theme; the canvas keeps the scene's own background.
+const darkQuery = window.matchMedia?.("(prefers-color-scheme: dark)")
+const applyTheme = () => document.documentElement.classList.toggle("dark", !!darkQuery?.matches)
+applyTheme()
+darkQuery?.addEventListener("change", applyTheme)
+
 if (import.meta.env.DEV) {
   Object.assign(window, { __ae: { store: useStore, runtime, presets } })
   // ?debug=parity compares the GPU interpreter with the CPU reference on every preset.

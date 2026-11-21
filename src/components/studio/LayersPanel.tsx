@@ -451,7 +451,11 @@ function LayerRow({
           ) : (
             <span className="size-5 shrink-0" />
           )}
-          <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-md border bg-background p-0.5", hiddenBy && "opacity-50")}>
+          <span
+            className={cn("flex size-8 shrink-0 items-center justify-center rounded-md border bg-background p-0.5", hiddenBy && "opacity-50")}
+            // Objects are previewed on the scene's own background, as on the canvas.
+            style={isGroup(l) || scene.material.transparent ? undefined : { background: scene.material.background }}
+          >
             {l.type === "letter" ? (
               <GlyphThumb char={l.char} set={l.set} color={l.color} axes={l.axes ? { ...scene.axes, ...l.axes } : undefined} />
             ) : l.type === "shape" ? (
