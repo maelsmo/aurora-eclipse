@@ -276,6 +276,7 @@ export function StudioCanvas() {
       const eff = runtime.step(st.scene, dt, st.playing, st.pointerOn)
       const pointer = st.pointerOn && runtime.pointerWorld ? runtime.pointerWorld : FAR
       const frame = buildFrame(eff, st.library, runtime.time, pointer)
+      runtime.physicsFrame(frame, st.scene, eff, dt, st.playing)
       runtime.frame = frame
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
       const cw = el.clientWidth,

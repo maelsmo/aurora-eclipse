@@ -9,6 +9,9 @@ import { migrateScene } from "./migrate"
 import { normalize } from "./tree"
 import {
   CLONE_LIMITS,
+  PHYSICS_LIMITS,
+  defaultPhysics,
+  type Physics,
   defaultCloner,
   defaultEffector,
   type Cloner,
@@ -293,6 +296,27 @@ export function sanitizeCloner(raw: unknown): Cloner {
   }
 }
 
+export function sanitizePhysics(raw: unknown): Physics | undefined {
+  if (!isObj(raw)) return undefined
+  const d = defaultPhysics
+  return {
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : true,
+    gravity: num(raw.gravity, d.gravity, 0, 4),
+    gravityAngle: num(raw.gravityAngle, d.gravityAngle, -360, 360),
+    bounce: num(raw.bounce, d.bounce, 0, 1),
+    friction: num(raw.friction, d.friction, 0, 1),
+    air: num(raw.air, d.air, 0, 0.5),
+    bounds: oneOf(raw.bounds, ["box", "floor", "none"] as const, d.bounds),
+    shape: raw.shape === "circle" ? "circle" : "box",
+    pointer: oneOf(raw.pointer, ["none", "repel", "attract", "vortex"] as const, d.pointer),
+    pointerForce: num(raw.pointerForce, d.pointerForce, 0, 4),
+    pointerRadius: num(raw.pointerRadius, d.pointerRadius, 0.5, 60),
+    field: oneOf(raw.field, ["none", "attract", "repel", "vortex", "wind", "pulse"] as const, d.field),
+    fieldForce: num(raw.fieldForce, d.fieldForce, 0, 4),
+    maxBodies: Math.round(num(raw.maxBodies, d.maxBodies, 1, PHYSICS_LIMITS.maxBodies)),
+  }
+}
+
 function sanitizeRoute(raw: unknown): Route | null {
   if (!isObj(raw)) return null
   if (!(signalIds as readonly string[]).includes(raw.source as string)) return null
@@ -335,6 +359,8 @@ export function sanitizeScene(input: unknown, ctx: SanitizeContext): Scene | nul
   scene.speed = num(raw.speed, 1, 0, 10)
   scene.tracking = num(raw.tracking, scene.tracking, -10, 10)
   scene.artboard = sanitizeArtboard(raw.artboard)
+  const physics = sanitizePhysics(raw.physics)
+  if (physics) scene.physics = physics
   const nodes = raw.layers
     .slice(0, LIMITS.nodes * 2)
     .map((n) => sanitizeNode(n, ctx))

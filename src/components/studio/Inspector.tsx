@@ -10,6 +10,7 @@ import { MotionTab } from "./MotionTab"
 import { MaterialTab } from "./MaterialTab"
 import { LookTab } from "./LookTab"
 import { ObjectTab, SceneTab } from "./ObjectTab"
+import { PhysicsTab } from "./PhysicsTab"
 
 type TabDef = { value: string; label: string; Body: () => React.ReactNode }
 
@@ -18,6 +19,7 @@ const sceneTabs: TabDef[] = [
   { value: "look", label: "Вид", Body: LookTab },
   { value: "material", label: "Материал", Body: MaterialTab },
   { value: "motion", label: "Движение", Body: () => <MotionTab scope="scene" /> },
+  { value: "physics", label: "Физика", Body: PhysicsTab },
 ]
 
 /** The tab set follows the selection: the scene when nothing is selected, the object otherwise. */

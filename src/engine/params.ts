@@ -4,7 +4,7 @@
 // "layer:<id>.cloner.effectors.<effector id>.amount"… parseTarget() splits it.
 // Inside arrays a path segment names the element by its id.
 import type { AxisKey } from "./axes"
-import type { Cloner, Effector, Layer, Look, Material, Scene, ShapeDef, Warp } from "./scene/types"
+import type { Cloner, Effector, Layer, Look, Material, Physics, Scene, ShapeDef, Warp } from "./scene/types"
 
 export type ParamDef = {
   label: string
@@ -126,6 +126,19 @@ export const effectorParams: Record<EffectorNumKey, ParamDef> = {
   seed: { label: "Зерно случая", min: 1, max: 999, step: 1 },
 }
 
+export type PhysicsNumKey = NumKeys<Physics>
+export const physicsParams: Record<PhysicsNumKey, ParamDef> = {
+  gravity: { label: "Гравитация", min: 0, max: 4, step: 0.01, hint: "1 — как на Земле" },
+  gravityAngle: { label: "Направление", min: -180, max: 180, step: 1, unit: "°", mode: "offset", hint: "−90° — вниз" },
+  bounce: { label: "Упругость", min: 0, max: 1, step: 0.01 },
+  friction: { label: "Трение", min: 0, max: 1, step: 0.01 },
+  air: { label: "Сопротивление воздуха", min: 0, max: 0.2, step: 0.001 },
+  pointerForce: { label: "Сила курсора", min: 0, max: 4, step: 0.01 },
+  pointerRadius: { label: "Радиус курсора", min: 0.5, max: 30, step: 0.1, unit: "m" },
+  fieldForce: { label: "Сила поля", min: 0, max: 4, step: 0.01 },
+  maxBodies: { label: "Тел не больше", min: 10, max: 800, step: 10 },
+}
+
 export const sceneParams = {
   speed: { label: "Темп времени", min: 0, max: 3, step: 0.01 } as ParamDef,
   tracking: { label: "Трекинг", min: -3, max: 3, step: 0.05, unit: "m" } as ParamDef,
@@ -134,7 +147,7 @@ export const sceneParams = {
 /* ---------- targets ---------- */
 
 export type Target =
-  | { scope: "axes" | "warp" | "material" | "look" | "scene"; path: string[] }
+  | { scope: "axes" | "warp" | "material" | "look" | "scene" | "physics"; path: string[] }
   | { scope: "node"; id: string; path: string[] }
 
 export function parseTarget(target: string): Target | null {
@@ -142,7 +155,7 @@ export function parseTarget(target: string): Target | null {
   if (m) return { scope: "node", id: m[1], path: m[2].split(".") }
   const [head, ...path] = target.split(".")
   if (!path.length) return null
-  if (head === "axes" || head === "warp" || head === "material" || head === "look" || head === "scene") return { scope: head, path }
+  if (head === "axes" || head === "warp" || head === "material" || head === "look" || head === "scene" || head === "physics") return { scope: head, path }
   return null
 }
 
@@ -164,6 +177,8 @@ export function paramDef(target: string): ParamDef | undefined {
       return lookParams[a as LookNumKey]
     case "scene":
       return sceneParams[a as keyof typeof sceneParams]
+    case "physics":
+      return a === "maxBodies" ? undefined : physicsParams[a as PhysicsNumKey]
     case "node":
       if (t.path.length === 1) return layerParams[a as LayerNumKey]
       if (a === "look") return lookParams[b as LookNumKey]
@@ -208,7 +223,7 @@ function nodeFallback(scene: Pick<Scene, "look" | "axes">, path: string[]): numb
 }
 
 /** Reads the current value of a modulation target from a scene. */
-export function readParam(scene: Pick<Scene, "axes" | "warp" | "material" | "look" | "layers" | "speed" | "tracking">, target: string): number | undefined {
+export function readParam(scene: Pick<Scene, "axes" | "warp" | "material" | "look" | "layers" | "speed" | "tracking" | "physics">, target: string): number | undefined {
   const t = parseTarget(target)
   if (!t) return undefined
   if (t.scope === "node") {

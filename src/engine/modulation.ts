@@ -43,6 +43,7 @@ export function applyRoutes(scene: Scene, signals: Signals, state?: RouteState):
     warp: { ...scene.warp },
     material: { ...scene.material },
     look: { ...scene.look },
+    ...(scene.physics ? { physics: { ...scene.physics } } : {}),
   }
   let layers: Layer[] | null = null
   const index = new Map(scene.layers.map((l, i) => [l.id, i]))
@@ -67,7 +68,7 @@ export function applyRoutes(scene: Scene, signals: Signals, state?: RouteState):
       continue
     }
     const base = readPath(s[t.scope], t.path)
-    if (base === undefined) continue
+    if (base === undefined || !s[t.scope]) continue
     const next = apply(def, base, r.amount, v)
     if (t.scope === "axes") {
       const k = t.path[0] as AxisKey

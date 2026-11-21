@@ -397,7 +397,60 @@ export type Scene = {
   speed: number
   tracking: number
   artboard: Artboard
+  /** Rigid-body simulation of the objects (off when absent). */
+  physics?: Physics
 }
+
+export type PhysicsBounds = "box" | "floor" | "none"
+export type PhysicsPointer = "none" | "repel" | "attract" | "vortex"
+export type PhysicsField = "none" | "attract" | "repel" | "vortex" | "wind" | "pulse"
+
+/**
+ * Physics of a scene: every drawn object (letter, shape, clone or merge
+ * group) becomes a rigid body; the simulation moves them in the live view and
+ * in video. Locked objects are static supports.
+ */
+export type Physics = {
+  enabled: boolean
+  /** Gravity strength (1 = earth-like) and direction in degrees (−90 = down). */
+  gravity: number
+  gravityAngle: number
+  bounce: number
+  friction: number
+  /** Air drag. */
+  air: number
+  /** Walls of the artboard frame. */
+  bounds: PhysicsBounds
+  /** Collision shape of the bodies. */
+  shape: "box" | "circle"
+  pointer: PhysicsPointer
+  pointerForce: number
+  pointerRadius: number
+  /** Field around the artboard centre. */
+  field: PhysicsField
+  fieldForce: number
+  /** Bodies simulated at most; the rest stay where they are. */
+  maxBodies: number
+}
+
+export const defaultPhysics: Physics = {
+  enabled: true,
+  gravity: 1,
+  gravityAngle: -90,
+  bounce: 0.3,
+  friction: 0.2,
+  air: 0.01,
+  bounds: "box",
+  shape: "box",
+  pointer: "repel",
+  pointerForce: 0.5,
+  pointerRadius: 6,
+  field: "none",
+  fieldForce: 0.5,
+  maxBodies: 400,
+}
+
+export const PHYSICS_LIMITS = { maxBodies: 800 }
 
 export const LIMITS = {
   nodes: 256,
