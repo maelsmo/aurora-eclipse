@@ -200,27 +200,43 @@ export function pickLayer(f: Frame, x: number, y: number, slack = 0): number {
   return -1
 }
 
+/** World bounds of one layer (transformed glyph box), before warps. */
+export function layerBounds(l: FrameLayer, pad = 0): Box {
+  const b: Box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }
+  const g = l.glyph.box
+  const ink = Math.max(0, l.glyph.ink)
+  for (const [gx, gy] of [
+    [g.x0 - ink, g.y0 - ink],
+    [g.x1 + ink, g.y0 - ink],
+    [g.x0 - ink, g.y1 + ink],
+    [g.x1 + ink, g.y1 + ink],
+  ]) {
+    const lx = (gx - l.ax) * l.scale,
+      ly = (gy - l.ay) * l.scale
+    const x = l.x + l.cos * lx - l.sin * ly,
+      y = l.y + l.sin * lx + l.cos * ly
+    b.x0 = Math.min(b.x0, x)
+    b.y0 = Math.min(b.y0, y)
+    b.x1 = Math.max(b.x1, x)
+    b.y1 = Math.max(b.y1, y)
+  }
+  return { x0: b.x0 - pad, y0: b.y0 - pad, x1: b.x1 + pad, y1: b.y1 + pad }
+}
+
+/** How far the warps can move a point (bounds of wave, flow and the pointer lens). */
+export function warpReach(w: Warp) {
+  return w.wave + w.flow + 0.43 * Math.abs(w.pointer) * w.pointerRadius
+}
+
 /** World bounds of the frame (union of transformed glyph boxes). */
 export function frameBounds(f: Frame, pad = 0): Box {
   const b: Box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }
   for (const l of f.layers) {
-    const g = l.glyph.box
-    const ink = Math.max(0, l.glyph.ink)
-    for (const [gx, gy] of [
-      [g.x0 - ink, g.y0 - ink],
-      [g.x1 + ink, g.y0 - ink],
-      [g.x0 - ink, g.y1 + ink],
-      [g.x1 + ink, g.y1 + ink],
-    ]) {
-      const lx = (gx - l.ax) * l.scale,
-        ly = (gy - l.ay) * l.scale
-      const x = l.x + l.cos * lx - l.sin * ly,
-        y = l.y + l.sin * lx + l.cos * ly
-      b.x0 = Math.min(b.x0, x)
-      b.y0 = Math.min(b.y0, y)
-      b.x1 = Math.max(b.x1, x)
-      b.y1 = Math.max(b.y1, y)
-    }
+    const lb = layerBounds(l)
+    b.x0 = Math.min(b.x0, lb.x0)
+    b.y0 = Math.min(b.y0, lb.y0)
+    b.x1 = Math.max(b.x1, lb.x1)
+    b.y1 = Math.max(b.y1, lb.y1)
   }
   if (!Number.isFinite(b.x0)) return { x0: -3, y0: -3, x1: 3, y1: 3 }
   return { x0: b.x0 - pad, y0: b.y0 - pad, x1: b.x1 + pad, y1: b.y1 + pad }

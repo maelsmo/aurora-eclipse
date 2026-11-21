@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
-import { Bookmark, Download, Loader2 } from "lucide-react"
+import { Bookmark, Download, Loader2, TriangleAlert } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,7 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { SceneThumb } from "./Thumbs"
-import { frameToSVG, makeRecipe, recordCanvas, fileStem } from "@/engine/export"
+import { exportSVG, makeRecipe, recordCanvas, fileStem, vectorWarnings } from "@/engine/export"
 import { renderPNG } from "@/engine/gpu/thumbs"
 import { frameBounds } from "@/engine/frame"
 import { fitView, materialReach, sceneFrame } from "@/engine/view"
@@ -100,7 +101,8 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       const stem = fileStem(frozen.scene)
       if (format === "svg") {
         const frame = sceneFrame(frozen.scene, alphabet, revision, frozen.time)
-        const svg = frameToSVG(frame, { ...frozen.scene.material, transparent }, frozen.scene.layers[0]?.color)
+        const svg = await exportSVG(frame, frozen.scene.material, { transparent }, setProgress)
+        setProgress(0)
         download(new Blob([svg], { type: "image/svg+xml" }), stem + ".svg")
       } else if (format === "png") {
         const frame = sceneFrame(frozen.scene, alphabet, revision, frozen.time)
@@ -143,7 +145,7 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   }
 
   const notes: Record<Format, string> = {
-    svg: "Кривые Безье текущего кадра. 1 модуль = 10 мм. Контур и изолинии выгружаются обводкой — удобно для плоттера и лазера.",
+    svg: "Точные контуры текущего кадра: прямые и кривые Безье, цвет каждой буквы — отдельной областью. 1 модуль = 10 мм. Контур и изолинии выгружаются обводкой — удобно для плоттера и лазера.",
     png: "Растр текущего кадра со всеми эффектами материала.",
     video: "Запись холста студии в WebM с текущим движением и сигналами. Не переключайте вкладку во время записи.",
     json: "Рецепт: сцена, связи, движение и изменённые знаки алфавита. Подходит для переноса и будущего 3D.",
@@ -184,6 +186,13 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
           <ToggleGroupItem value="json" className="flex-1">JSON</ToggleGroupItem>
         </ToggleGroup>
         <p className="text-sm text-muted-foreground">{notes[format]}</p>
+        {format === "svg" && vectorWarnings(scene.material).length > 0 && (
+          <Alert>
+            <TriangleAlert />
+            <AlertTitle>Не войдёт в вектор</AlertTitle>
+            <AlertDescription>{vectorWarnings(scene.material).join(", ")}. Для них используйте PNG.</AlertDescription>
+          </Alert>
+        )}
         {(format === "svg" || format === "png") && (
           <div className="flex items-center justify-between gap-2">
             <Label htmlFor="exp-transparent" className="font-normal">
@@ -221,7 +230,7 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
         <DialogFooter>
           <Button onClick={run} disabled={busy}>
             {busy ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Download data-icon="inline-start" />}
-            {busy ? (format === "video" ? `Запись… ${Math.round(progress * 100)}%` : "Подготовка…") : "Скачать"}
+            {busy ? (format === "video" ? `Запись… ${Math.round(progress * 100)}%` : format === "svg" ? `Контуры… ${Math.round(progress * 100)}%` : "Подготовка…") : "Скачать"}
           </Button>
         </DialogFooter>
       </DialogContent>

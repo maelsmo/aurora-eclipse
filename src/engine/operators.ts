@@ -67,6 +67,37 @@ const front = (acc: number, b: number, aa: number) =>
   clamp(0.5 + (0.5 * (acc - b)) / aa, 0, 1)
 
 /**
+ * How an operator assigns colour, for vector export:
+ * - "capture": the layer owns a region bounded by its front (see frontOf);
+ * - "tone": the layer tints everything below by a constant weight;
+ * - "none": the layer only changes the shape.
+ */
+export type OpRole = "capture" | "tone" | "none"
+
+export function opRole(op: Op): OpRole {
+  return op === "cut" ? "none" : op === "intersect" || op === "morph" ? "tone" : "capture"
+}
+
+/** Constant colour weight of a toning operator (matches combine()). */
+export const toneOf = (op: Op, t: number) => (op === "morph" ? clamp(t, 0, 1) : 0.5)
+
+/**
+ * Signed front of a capturing operator: negative exactly where combine()
+ * gives the layer more than half of the colour weight. Mirrors combine().
+ */
+export function frontOf(op: Op, acc: number, b: number, gap: number): number {
+  switch (op) {
+    case "eclipse":
+      return Math.max(b, gap - acc) - acc
+    case "inlay":
+      return b - Math.max(acc, gap - b)
+    default:
+      // union, fuse (blendWeight > 0.5 ⇔ b < acc), xor
+      return b - acc
+  }
+}
+
+/**
  * Combines the accumulated field `acc` with the layer field `b`.
  * Returns the distance and the share of the layer colour at this point.
  * `aa` is the width of colour transitions (about one pixel).
