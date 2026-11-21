@@ -1,14 +1,23 @@
 // Starting compositions and contexts (material + palette over any composition).
 import { defaultAlphabet } from "./alphabet"
+import { geoAlphabet, geoLook } from "./alphabet/geo"
 import { defaultAxes } from "./axes"
 import {
+  defaultArtboard,
+  defaultCloner,
+  defaultEffector,
   defaultLook,
   defaultMaterial,
+  defaultPhysics,
   isLeaf,
   layoutText,
+  makeGroup,
   makeLayer,
+  makeScene,
   mergeScene,
   uid,
+  type Cloner,
+  type Layer,
   type LetterNode,
   type Look,
   type Material,
@@ -193,5 +202,83 @@ export const presets: Preset[] = [
     },
   },
 ]
+
+/* ---------- patterns of the geometric set ---------- */
+
+const geoWord = (text: string, over: Partial<LetterNode> = {}, tracking = 0.25) =>
+  layoutText(text, geoAlphabet, defaultAxes, tracking, { set: "geo", color: "#161616", ...over }, "geo#preset")
+
+/** A cloner group around its children (which sit at the origin). */
+function cloner(c: Partial<Cloner>, children: Layer[], over: Partial<Layer> = {}): Layer[] {
+  const g = makeGroup("stack", { name: "Клонер", cloner: { ...defaultCloner, ...c }, ...over } as never)
+  return [g, ...children.map((k) => ({ ...k, parent: g.id }))]
+}
+const tile = (char: string, color = "#161616") => makeLayer(char, { set: "geo", color })
+const frame = { ...defaultArtboard, enabled: true }
+
+export const patternPresets: Preset[] = [
+  {
+    id: "geo-lines",
+    name: "Геометрия · линии",
+    make: () => makeScene({ set: "geo", layers: geoWord("ЛИНИИ\nAURORA"), look: { ...defaultLook, ...geoLook, mode: "lines" }, artboard: frame }),
+  },
+  {
+    id: "rosette",
+    name: "Розетка",
+    make: () =>
+      makeScene({
+        set: "geo",
+        layers: cloner({ cols: 8, rows: 8, symmetry: "rotate", pick: "rings", palette: ["#161616", "#F2542D", "#5B3CF5", "#E9B824"] }, [tile("◜")]),
+        artboard: { ...frame, w: 24, h: 24 },
+      }),
+  },
+  {
+    id: "letter-mask",
+    name: "Буква из плиток",
+    make: () => {
+      const g = makeGroup("stack", { name: "Маска", mask: true })
+      const mask = { ...makeLayer("A", { set: "geo", scale: 3.4 }), parent: g.id }
+      const inner = cloner({ cols: 9, rows: 9, symmetry: "mirror", pick: "checker", palette: ["#161616", "#F2542D"] }, [tile("◜"), tile("●")], { parent: g.id })
+      return makeScene({ set: "geo", layers: [g, mask, ...inner], artboard: { ...frame, w: 24, h: 24 } })
+    },
+  },
+  {
+    id: "tile-wave",
+    name: "Волна плиток",
+    make: () =>
+      makeScene({
+        set: "geo",
+        layers: cloner(
+          {
+            cols: 14,
+            rows: 8,
+            pick: "diagonal",
+            palette: ["#161616", "#2F80ED"],
+            effectors: [{ ...defaultEffector, id: uid(), kind: "wave", amount: 1, position: 0, rotation: 0.5, scale: 0.15, freq: 0.06, speed: 0.25 }],
+          },
+          [tile("◠")],
+        ),
+        artboard: { ...frame, w: 36, h: 21 },
+      }),
+  },
+  {
+    id: "mosaic",
+    name: "Мозаика",
+    make: () => makeScene({ set: "geo", layers: geoWord("МОЗАИКА", { color: "#1E8C6E" }), look: { ...defaultLook, inset: 0.18 }, artboard: frame }),
+  },
+  {
+    id: "fall",
+    name: "Падение",
+    make: () =>
+      makeScene({
+        set: "geo",
+        layers: geoWord("ПАДАЮ", { color: "#161616" }).map((l, i) => ({ ...l, y: 4 + (i % 2) * 3, rotation: (i - 2) * 9 })),
+        physics: { ...defaultPhysics, bounce: 0.45 },
+        artboard: frame,
+      }),
+  },
+]
+
+export const allPresets: Preset[] = [...presets, ...patternPresets]
 
 export const initialScene = () => presets[0].make()

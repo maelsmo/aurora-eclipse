@@ -227,16 +227,19 @@ void main() {
   gl_Position = vec4(p, 0.0, 1.0);
 }`
 
-/** uPostMode 0: background colour; 1 / 2: positive / negative half of the grain. */
+/** uPostMode 0: background colour; 1 / 2: positive / negative half of the grain; 3: magnified halo target. */
 export const postFragment = `${header}
 ${noise.split("vec2 warp(")[0]}
 uniform int uPostMode;
 uniform vec4 uBg;
 uniform float uGrain;
 uniform float uTime;
+uniform vec2 uRes;
+uniform sampler2D uHalo;
 out vec4 outColor;
 void main() {
   if (uPostMode == 0) { outColor = vec4(uBg.rgb * uBg.a, uBg.a); return; }
+  if (uPostMode == 3) { outColor = texture(uHalo, gl_FragCoord.xy / uRes); return; }
   float n = hash2(ivec2(gl_FragCoord.xy) + ivec2(int(floor(uTime * 24.0)) * 7919, 0)) - 0.5;
   float v = (uPostMode == 1 ? max(n, 0.0) : max(-n, 0.0)) * uGrain * 0.3;
   outColor = vec4(vec3(v), 0.0);

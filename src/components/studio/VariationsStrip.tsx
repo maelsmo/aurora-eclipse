@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select"
 import { SceneThumb } from "@/components/shared/Thumbs"
 import { mutateScene, randomScene, type Locks } from "@/engine/variations"
-import { presets } from "@/engine/presets"
+import { allPresets as presets, patternPresets, presets as basePresets } from "@/engine/presets"
 import { charset } from "@/engine/alphabet"
 import type { Scene } from "@/engine/scene"
 import { useStore } from "@/state/store"
@@ -104,11 +104,22 @@ export function VariationsStrip() {
               <SelectValue placeholder="Стартовые сочетания" />
             </SelectTrigger>
             <SelectContent>
-              {presets.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                <SelectLabel>Сочетания</SelectLabel>
+                {basePresets.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel>Узоры и геометрия</SelectLabel>
+                {patternPresets.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>

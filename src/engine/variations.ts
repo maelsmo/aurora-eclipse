@@ -80,6 +80,8 @@ export function randomScene(seed: number, chars: string, current: Scene, locks: 
   return scene
 }
 
+const clonerPicks = ["cycle", "random", "rows", "cols", "rings", "diamond", "diagonal", "checker"] as const
+
 /** Nudges the current scene: numbers move by `strength`, letters and ops sometimes swap. */
 export function mutateScene(seed: number, chars: string, scene: Scene, strength: number, locks: Locks): Scene {
   const r = rng(seed)
@@ -94,7 +96,19 @@ export function mutateScene(seed: number, chars: string, scene: Scene, strength:
     const out = { ...l, id: idMap.get(l.id)! } as Layer
     if (l.parent) out.parent = idMap.get(l.parent)
     if (l.motion.target && idMap.has(l.motion.target)) out.motion = { ...l.motion, target: idMap.get(l.motion.target) }
-    if (l.type === "group") return out
+    if (l.type === "group") {
+      // Cloners vary their zones, symmetry, palette order and effector strength.
+      if (l.cloner && !locks.form && out.type === "group") {
+        const c = { ...l.cloner }
+        if (r() < 0.3 * s) c.pick = clonerPicks[Math.floor(r() * clonerPicks.length)]
+        if (r() < 0.2 * s) c.symmetry = (["none", "mirror", "rotate"] as const)[Math.floor(r() * 3)]
+        if (c.palette.length > 1 && r() < 0.35 * s) c.palette = [...c.palette.slice(1), c.palette[0]]
+        if (r() < 0.3 * s) c.seed += 1 + Math.floor(r() * 9)
+        c.effectors = c.effectors.map((e) => ({ ...e, amount: clamp(e.amount + gauss(r) * 0.3 * s, 0, 1), seed: r() < 0.3 * s ? e.seed + 1 : e.seed }))
+        out.cloner = c
+      }
+      return out
+    }
     if (!locks.letters) {
       if (out.type === "letter" && r() < 0.3 * s) (out as LetterNode).char = chars[Math.floor(r() * chars.length)]
       out.x += gauss(r) * 1.5 * s

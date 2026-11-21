@@ -34,6 +34,15 @@ type Program = { prog: WebGLProgram; loc: Map<string, WebGLUniformLocation | nul
 
 const envUniforms = ["uRes", "uView", "uTime", "uPointer", "uWave", "uFlow", "uPull", "uPad", "uShift"]
 
+/**
+ * Resolution divisor of a halo pass: soft halos (many pixels of blur) are
+ * smooth enough to draw at 1/2…1/4 and magnify; a few objects never need it.
+ */
+export function haloFactor(blurPx: number, instances: number) {
+  if (instances < 24) return 1
+  return Math.max(1, Math.min(4, Math.floor(blurPx / 4)))
+}
+
 export class GlyphRenderer {
   readonly canvas: HTMLCanvasElement
   private gl: WebGL2RenderingContext
@@ -47,6 +56,10 @@ export class GlyphRenderer {
   private primTex!: WebGLTexture
   private layerTex!: WebGLTexture
   private lookTex!: WebGLTexture
+  /** Reduced-resolution target of the corona and shadow passes. */
+  private haloTex: WebGLTexture | null = null
+  private haloFbo: WebGLFramebuffer | null = null
+  private haloSize: [number, number] = [0, 0]
   private packed = createPacked()
   /** Set when textures were recreated and every upload must happen again. */
   private fresh = true
@@ -145,7 +158,11 @@ export class GlyphRenderer {
       ...envUniforms,
       "uHaloMode", "uGlowColor", "uGlow", "uShadowColor", "uShadow",
     ])
-    this.post = this.program(postVertex, postFragment, ["uPostMode", "uBg", "uGrain", "uTime"])
+    this.post = this.program(postVertex, postFragment, ["uPostMode", "uBg", "uGrain", "uTime", "uRes"])
+    gl.uniform1i(gl.getUniformLocation(this.post.prog, "uHalo"), 3)
+    this.haloTex = null
+    this.haloFbo = null
+    this.haloSize = [0, 0]
 
     this.instanceBuffer = gl.createBuffer()!
     this.vao = gl.createVertexArray()!
@@ -215,12 +232,12 @@ export class GlyphRenderer {
     return p
   }
 
-  private setEnv(pr: Program, frame: Frame, view: View, pad: number, shift: [number, number]) {
+  private setEnv(pr: Program, frame: Frame, view: View, pad: number, shift: [number, number], res: [number, number] = [this.canvas.width, this.canvas.height]) {
     const gl = this.gl,
       L = pr.loc,
       w = frame.warp
     gl.useProgram(pr.prog)
-    gl.uniform2f(L.get("uRes")!, this.canvas.width, this.canvas.height)
+    gl.uniform2f(L.get("uRes")!, res[0], res[1])
     gl.uniform3f(L.get("uView")!, view.cx, view.cy, view.scale)
     gl.uniform1f(L.get("uTime")!, frame.time)
     gl.uniform2f(L.get("uPointer")!, frame.pointer[0], frame.pointer[1])
@@ -229,6 +246,49 @@ export class GlyphRenderer {
     gl.uniform2f(L.get("uPull")!, w.pointer, w.pointerRadius)
     gl.uniform1f(L.get("uPad")!, pad)
     gl.uniform2f(L.get("uShift")!, shift[0], shift[1])
+  }
+
+  /** Binds a cleared reduced-resolution target (1/f of the canvas) for a halo pass; returns its size. */
+  private beginHalo(f: number): [number, number] {
+    const gl = this.gl
+    const w = Math.max(1, Math.ceil(this.canvas.width / f)),
+      h = Math.max(1, Math.ceil(this.canvas.height / f))
+    if (!this.haloTex || this.haloSize[0] !== w || this.haloSize[1] !== h) {
+      if (this.haloTex) gl.deleteTexture(this.haloTex)
+      this.haloFbo ??= gl.createFramebuffer()
+      gl.activeTexture(gl.TEXTURE3)
+      this.haloTex = gl.createTexture()!
+      gl.bindTexture(gl.TEXTURE_2D, this.haloTex)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
+      for (const p of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, p, gl.LINEAR)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.haloFbo)
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.haloTex, 0)
+      this.haloSize = [w, h]
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.haloFbo)
+    gl.viewport(0, 0, w, h)
+    gl.clearColor(0, 0, 0, 0)
+    gl.clear(gl.COLOR_BUFFER_BIT)
+    return [w, h]
+  }
+
+  /** Back to the canvas; draws the halo target over it, magnified with bilinear filtering. */
+  private endHalo(over: boolean) {
+    const gl = this.gl
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height)
+    gl.useProgram(this.post.prog)
+    gl.activeTexture(gl.TEXTURE3)
+    gl.bindTexture(gl.TEXTURE_2D, this.haloTex)
+    gl.uniform1i(this.post.loc.get("uPostMode")!, 3)
+    gl.uniform2f(this.post.loc.get("uRes")!, this.canvas.width, this.canvas.height)
+    gl.blendEquation(gl.FUNC_ADD)
+    if (over) gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+    else gl.blendFunc(gl.ONE, gl.ZERO)
+    gl.bindVertexArray(this.postVao)
+    gl.drawArrays(gl.TRIANGLES, 0, 3)
   }
 
   render(frame: Frame, material: Material, view: View, opts: { transparent?: boolean } = {}) {
@@ -245,9 +305,13 @@ export class GlyphRenderer {
     const transparent = opts.transparent ?? m.transparent
 
     // 1. Corona: the strongest glow of any instance wins (MAX), i.e. the glow of the union.
+    // Every instance pads its quad by the whole reach, so with many objects the
+    // pass is drawn at a reduced resolution matched to the glow's softness.
     if (m.glow > 1 / 510 && n > 0) {
       const reach = m.glowSize * Math.log(510 * m.glow)
-      this.setEnv(this.halo, frame, view, reach, [0, 0])
+      const f = haloFactor(m.glowSize * view.scale, n)
+      const res = f > 1 ? this.beginHalo(f) : undefined
+      this.setEnv(this.halo, frame, f > 1 ? { ...view, scale: view.scale / f } : view, reach, [0, 0], res)
       const L = this.halo.loc
       gl.uniform1i(L.get("uHaloMode")!, 0)
       gl.uniform3fv(L.get("uGlowColor")!, hexToRgb(m.glowColor))
@@ -255,6 +319,7 @@ export class GlyphRenderer {
       gl.blendEquation(gl.MAX)
       gl.bindVertexArray(this.vao)
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n)
+      if (f > 1) this.endHalo(false)
     }
 
     // 2. Background underneath everything drawn so far.
@@ -273,12 +338,20 @@ export class GlyphRenderer {
     gl.bindVertexArray(this.vao)
     // 3. Shadows: the field sampled at world − offset, quads shifted by the offset.
     if (m.shadow > 0 && n > 0) {
-      this.setEnv(this.halo, frame, view, m.shadowSoft + 3 / view.scale, [m.shadowX, m.shadowY])
+      const f = haloFactor(m.shadowSoft * view.scale, n)
+      const res = f > 1 ? this.beginHalo(f) : undefined
+      this.setEnv(this.halo, frame, f > 1 ? { ...view, scale: view.scale / f } : view, m.shadowSoft + (3 * f) / view.scale, [m.shadowX, m.shadowY], res)
       const L = this.halo.loc
       gl.uniform1i(L.get("uHaloMode")!, 1)
       gl.uniform3fv(L.get("uShadowColor")!, hexToRgb(m.shadowColor))
       gl.uniform2f(L.get("uShadow")!, m.shadow, m.shadowSoft)
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+      gl.bindVertexArray(this.vao)
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n)
+      if (f > 1) {
+        this.endHalo(true)
+        gl.bindVertexArray(this.vao)
+      }
     }
 
     // 4. Bodies in z-order: runs of one instance kind share a program.

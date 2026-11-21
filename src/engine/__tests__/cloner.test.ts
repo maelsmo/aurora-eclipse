@@ -212,3 +212,32 @@ describe("cloner paths", () => {
     expect(sm?.type === "group" && sm.cloner).toBeUndefined()
   })
 })
+
+describe("pattern presets", () => {
+  it("build frames and survive a save round trip", async () => {
+    const { patternPresets } = await import("../presets")
+    for (const p of patternPresets) {
+      const s = p.make()
+      const f = buildFrame(s, lib, 0, FAR)
+      expect(f.items.length, p.id).toBeGreaterThan(0)
+      const back = sanitizeScene(JSON.parse(JSON.stringify(s)), { sets: ["main", "geo"], fallbackSet: "main" })!
+      expect(buildFrame(back, lib, 0, FAR).items.length, p.id).toBe(f.items.length)
+    }
+  })
+})
+
+describe("variations of patterns", () => {
+  it("mutate cloners without breaking the scene", async () => {
+    const { patternPresets } = await import("../presets")
+    const { mutateScene } = await import("../variations")
+    const locks = { letters: false, combine: false, form: false, material: false }
+    for (const p of patternPresets) {
+      const s = p.make()
+      for (let seed = 1; seed <= 6; seed++) {
+        const m = mutateScene(seed, "АБВГД", s, 1, locks)
+        expect(buildFrame(m, lib, 0, FAR).items.length, p.id).toBeGreaterThan(0)
+        expect(sanitizeScene(JSON.parse(JSON.stringify(m)), { sets: ["main", "geo"], fallbackSet: "main" }), p.id).not.toBeNull()
+      }
+    }
+  })
+})
