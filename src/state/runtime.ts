@@ -7,7 +7,7 @@ import type { Layer, Scene } from "@/engine/scene"
 import { loadMatter, matterLoaded, PhysicsWorld } from "@/engine/physics"
 import { clamp } from "@/engine/sdf"
 
-class Runtime {
+export class Runtime {
   /** Scene time in seconds (scaled by the tempo, frozen on pause). */
   time = 0
   pointerWorld: [number, number] | null = null

@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react"
 import { drawScene, type ThumbOptions } from "@/engine/gpu/thumbs"
+import { fitView } from "@/engine/view"
+import type { Frame } from "@/engine/frame"
+import type { Box } from "@/engine/types"
 import { defaultLook, makeLayer, makeScene, type LookPatch, type Scene } from "@/engine/scene"
 import type { Axes } from "@/engine/axes"
 import { useStore } from "@/state/store"
@@ -31,16 +34,22 @@ export function SceneThumb({
   className,
   options,
   label,
+  frame,
+  box,
 }: {
   scene: Scene
   className?: string
   options?: ThumbOptions
   label?: string
+  /** A prebuilt frame (the live view with physics) instead of the scene's own. */
+  frame?: Frame
+  /** World box that fills the canvas exactly (the export frame). */
+  box?: Box
 }) {
   const library = useStore((s) => s.library)
   const ref = useCanvasDraw(
-    (c) => drawScene(c, scene, library, options),
-    [scene, library, JSON.stringify(options ?? {})],
+    (c) => drawScene(c, scene, library, { ...options, frame, view: box ? fitView(box, c.width, c.height, 0) : options?.view }),
+    [scene, library, JSON.stringify(options ?? {}), frame, box && JSON.stringify(box)],
   )
   return <canvas ref={ref} role="img" aria-label={label} className={cn("block size-full", className)} />
 }

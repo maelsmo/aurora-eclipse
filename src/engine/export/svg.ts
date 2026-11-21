@@ -1,8 +1,12 @@
 // SVG of one frame from exact contours: every draw item becomes a group;
-// colour regions are filled paths, outline and isolines are strokes,
-// halftone is circles.
-import { frameBounds, sampleItem, warpReach, type Frame, type FrameItem, type RGB } from "../frame"
-import { clamp } from "../sdf"
+// colour regions are filled paths, outline, isolines and lines are strokes
+// along centre lines, halftone is circles. Letters, shapes and clones that
+// repeat one glyph are traced once into <defs> and placed with <use>;
+// rectangles and ellipses stay native elements.
+import { frameBounds, sampleItem, warpReach, type Frame, type FrameItem, type FrameLayer, type RGB } from "../frame"
+import { clamp, isGeoPrim, sdGlyph } from "../sdf"
+import type { CompiledGlyph } from "../types"
+import { moduleStripes, stripesPath } from "./stripes"
 import type { Look, Material } from "../scene/types"
 import type { Box, Vec } from "../types"
 import { buildRegions, foldFronts, itemBounds, regionField, type Region } from "./regions"
@@ -14,6 +18,8 @@ export const UNIT = 100
 export type SvgOptions = {
   transparent?: boolean
   trace?: TraceOptions
+  /** Frame of the file in world units (the artboard); fitted to the content when absent. */
+  box?: Box
 }
 
 export const hex = (c: readonly number[]) =>
@@ -54,6 +60,47 @@ function frontField(f: Frame, it: FrameItem, r: Region): Field | null {
   }
 }
 
+/** Can this item be drawn as a placed copy of its glyph (no warp, mask or per-pixel colour)? */
+function placeable(f: Frame, it: FrameItem) {
+  return (
+    it.kind === "solo" &&
+    !it.mask &&
+    warpReach(f.warp) === 0 &&
+    it.look.colorMode === "layer" &&
+    (it.look.mode === "fill" || (it.look.mode === "lines" && !!it.layers[0].glyph.tiles?.length))
+  )
+}
+
+/** SVG matrix placing glyph units (y up, × UNIT, y flipped) of a layer on the page. */
+function placement(l: FrameLayer, box: Box) {
+  const s = l.scale,
+    m = l.mirror
+  const a = s * l.cos * m,
+    b = -s * l.sin * m,
+    c = s * l.sin,
+    d = s * l.cos
+  const e = UNIT * (l.x - box.x0) - UNIT * s * (l.cos * m * l.ax - l.sin * l.ay)
+  const f = UNIT * (box.y1 - l.y) + UNIT * s * (l.sin * m * l.ax + l.cos * l.ay)
+  const n = (v: number) => +v.toFixed(5)
+  return `matrix(${n(a)} ${n(b)} ${n(c)} ${n(d)} ${+e.toFixed(2)} ${+f.toFixed(2)})`
+}
+
+/** A glyph that is one plain rectangle or ellipse: its native SVG element in glyph units. */
+function nativeShape(g: CompiledGlyph, inset: number): string | null {
+  if (g.prims.length !== 1 || g.shear !== 0 || g.fillet > 0 || g.ink !== 0 || inset > 0) return null
+  const p = g.prims[0]
+  if (!isGeoPrim(p) || p.neg || p.mode === 2 || p.mode === 3) return null
+  const U = UNIT,
+    n = (v: number) => +v.toFixed(2)
+  if (p.kind === "box") {
+    const r = p.r[0]
+    if (!p.r.every((v) => Math.abs(v - r) < 1e-9) || r > Math.min(p.h[0], p.h[1]) + 1e-9) return null
+    return `<rect x="${n((p.c[0] - p.h[0]) * U)}" y="${n(-(p.c[1] + p.h[1]) * U)}" width="${n(2 * p.h[0] * U)}" height="${n(2 * p.h[1] * U)}"${r > 0 ? ` rx="${n(r * U)}"` : ""}/>`
+  }
+  if (p.kind === "ellipse") return `<ellipse cx="${n(p.c[0] * U)}" cy="${n(-p.c[1] * U)}" rx="${n(p.rx * U)}" ry="${n(p.ry * U)}"/>`
+  return null
+}
+
 /**
  * Builds the SVG. `onProgress` receives 0…1 while contours are traced.
  */
@@ -62,7 +109,7 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
   const transparent = opts.transparent ?? m.transparent
   const wr = warpReach(frame.warp)
   const reach = Math.max(0, ...frame.items.map(lookReach))
-  const box = frameBounds(frame, 0.6 + reach + wr)
+  const box = opts.box ?? frameBounds(frame, 0.6 + reach + wr)
   const W = +((box.x1 - box.x0) * UNIT).toFixed(2),
     H = +((box.y1 - box.y0) * UNIT).toFixed(2)
   const map = (p: Vec): Vec => [(p[0] - box.x0) * UNIT, (box.y1 - p[1]) * UNIT]
@@ -71,8 +118,40 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
   const uidPrefix = "ae" + Math.random().toString(36).slice(2, 7) + "-"
   const defs: string[] = []
   const groups: string[] = []
+  // Traced glyphs and stripe bundles shared by every copy: glyph → look key → def id.
+  const shared = new Map<CompiledGlyph, Map<string, string | null>>()
+  const local = (p: Vec): Vec => [p[0] * UNIT, -p[1] * UNIT]
 
-  const plan = frame.items.map((it) => ({ it, regions: buildRegions(frame, it) }))
+  /** Def of a glyph drawn by a look in its own units, traced once; null when it draws nothing. */
+  const glyphDef = (g: CompiledGlyph, look: Look): string | null => {
+    const key = `${look.mode}|${look.inset}|${look.stripes}|${look.stripeFill}|${look.lineDir ?? ""}`
+    let byLook = shared.get(g)
+    if (!byLook) shared.set(g, (byLook = new Map()))
+    if (byLook.has(key)) return byLook.get(key)!
+    const id = `${uidPrefix}g${defs.length}`
+    let body: string | null = null
+    if (look.mode === "lines") {
+      const st = moduleStripes(g, look.inset, look.lineDir, look.stripes)
+      // Stripes in glyph units: a layer of scale 1 at the origin (world = glyph − anchor).
+      const unitLayer = { x: 0, y: 0, cos: 1, sin: 0, scale: 1, mirror: 1, ax: 0, ay: 0, glyph: g } as FrameLayer
+      const d = stripesPath(st, unitLayer, local, UNIT, contoursToPath)
+      if (d) body = `<path d="${d}" fill="none" stroke-width="${+((look.stripeFill / Math.max(look.stripes, 0.1)) * UNIT).toFixed(2)}"/>`
+    } else {
+      body = nativeShape(g, look.inset)
+      if (!body) {
+        const b = g.box
+        const pad = 0.6 + Math.max(0, g.ink)
+        const cs = traceField((x, y) => sdGlyph(g, x, y, look.inset), { x0: b.x0 - pad, y0: b.y0 - pad, x1: b.x1 + pad, y1: b.y1 + pad }, opts.trace)
+        const d = contoursToPath(cs, local)
+        if (d) body = `<path d="${d}"/>`
+      }
+    }
+    if (body) defs.push(`<g id="${id}">${body}</g>`)
+    byLook.set(key, body ? id : null)
+    return body ? id : null
+  }
+
+  const plan = frame.items.map((it) => ({ it, regions: placeable(frame, it) ? [] : buildRegions(frame, it) }))
   const total = Math.max(1, plan.reduce((n, p) => n + p.regions.length + 1 + (m.overlap > 0 ? 1 : 0), 0))
   let done = 0
   const tick = () => onProgress?.(Math.min(1, ++done / total))
@@ -80,10 +159,21 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
   plan.forEach(({ it, regions }, ii) => {
     const look = it.look
     const parts: string[] = []
+    const op = it.opacity < 1 ? ` opacity="${+it.opacity.toFixed(3)}"` : ""
+    if (placeable(frame, it)) {
+      const l = it.layers[0]
+      const id = glyphDef(l.glyph, look)
+      tick()
+      if (id) {
+        const paint = look.mode === "lines" ? `stroke="${hex(l.color)}"` : `fill="${hex(l.color)}"`
+        groups.push(`<use href="#${id}" transform="${placement(l, box)}" ${paint}${op}/>`)
+      }
+      return
+    }
     const d0: Field = (x, y) => foldFronts(frame, it, x, y)
     const fuse = Math.max(0, ...it.layers.map((l) => (l.op === "fuse" ? l.k * 0.3 : 0)))
     const ibox = itemBounds(it, 0.6 + lookReach(it) + wr + fuse)
-    if (look.mode === "fill" || look.mode === "lines") {
+    if (look.mode === "fill") {
       for (const r of regions) {
         const d = path(regionField(frame, it, r), r.box)
         tick()
@@ -97,24 +187,36 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
         tick()
         if (d) parts.push(`<path d="${d}" fill="${m.overlapColor}" fill-opacity="${m.overlap.toFixed(3)}"/>`)
       }
-    } else if (look.mode === "outline" || look.mode === "isolines") {
+    } else if (look.mode === "outline" || look.mode === "isolines" || look.mode === "lines") {
       // Centre lines of the strokes, traced from one sampling of the field.
+      // Lines follow the contour inwards: stripe k is centred (k + ½) / n inside
+      // (glyph units of a single object, world units of a merge group).
       const sp = Math.max(look.spacing, 0.02)
       const n = Math.max(1, Math.round(look.rings))
-      const levels = look.mode === "outline" ? [0] : Array.from({ length: 2 * n + 1 }, (_, k) => (k - n) * sp)
+      const unit = it.kind === "solo" ? it.layers[0].scale : 1
+      const pitch = unit / Math.max(look.stripes, 0.1)
+      const depth = Math.max(...it.layers.map((l) => (l.glyph.box.y1 - l.glyph.box.y0) * l.scale)) / 2
+      const levels =
+        look.mode === "outline"
+          ? [0]
+          : look.mode === "lines"
+            ? Array.from({ length: Math.min(200, Math.ceil(depth / pitch)) }, (_, k) => -(k + 0.5) * pitch)
+            : Array.from({ length: 2 * n + 1 }, (_, k) => (k - n) * sp)
+      const width = look.mode === "lines" ? look.stripeFill * pitch : look.line
       const traced = traceLevels(d0, intersect(ibox, box), levels, opts.trace)
       const lines = traced
         .map((cs, k) => ({ d: contoursToPath(cs, map), opacity: look.mode === "isolines" && Math.abs(k - n) === n ? 0.5 : 1 }))
         .filter((l) => l.d)
       tick()
+      if (!lines.length) return
       const linesId = `${uidPrefix}lines-${ii}`
       defs.push(
-        `<g id="${linesId}" fill="none" stroke-width="${(look.line * UNIT).toFixed(2)}" stroke-linejoin="round">` +
+        `<g id="${linesId}" fill="none" stroke-width="${(width * UNIT).toFixed(2)}" stroke-linejoin="round">` +
           lines.map((l) => `<path d="${l.d}"${l.opacity < 1 ? ` stroke-opacity="${l.opacity}"` : ""}/>`).join("") +
           "</g>",
       )
       // Each colour region repaints the lines inside its own area (clip by its front).
-      const band = lookReach(it) + look.line
+      const band = lookReach(it) + width
       regions.forEach((r, i) => {
         const ff = frontField(frame, it, r)
         if (!ff) {
@@ -156,13 +258,18 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
       for (const [color, list] of byColor) parts.push(`<g fill="${color}">${list.join("")}</g>`)
       tick()
     }
-    if (parts.length) {
-      const op = it.opacity < 1 ? ` opacity="${+it.opacity.toFixed(3)}"` : ""
-      groups.push(`<g id="${uidPrefix}${it.id.replace(/#/g, "-")}"${op}>${parts.join("")}</g>`)
-    }
+    if (parts.length) groups.push(`<g id="${uidPrefix}${it.id.replace(/#/g, "-")}"${op}>${parts.join("")}</g>`)
   })
   onProgress?.(1)
   const bg = transparent ? "" : `<rect width="${W}" height="${H}" fill="${m.background}"/>`
+  // With a fixed frame, copies placed past its edge are clipped like the traced shapes.
+  const frameClip = opts.box ? `${uidPrefix}frame` : ""
+  if (frameClip) defs.push(`<clipPath id="${frameClip}"><rect width="${W}" height="${H}"/></clipPath>`)
   const head = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${+((W / UNIT) * 10).toFixed(2)}mm" height="${+((H / UNIT) * 10).toFixed(2)}mm">`
-  return head + (defs.length ? `<defs>${defs.join("")}</defs>` : "") + bg + `<g id="composition">${groups.join("")}</g></svg>`
+  return (
+    head +
+    (defs.length ? `<defs>${defs.join("")}</defs>` : "") +
+    bg +
+    `<g id="composition"${frameClip ? ` clip-path="url(#${frameClip})"` : ""}>${groups.join("")}</g></svg>`
+  )
 }

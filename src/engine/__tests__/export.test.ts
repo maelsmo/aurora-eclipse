@@ -118,3 +118,70 @@ describe("colour regions", () => {
     }
   })
 })
+
+describe("svg placement and native elements", () => {
+  const lib = defaultLibrary()
+  const box = { x0: -10, y0: -8, x1: 10, y1: 8 }
+  const map = (p: Vec): Vec => [(p[0] - box.x0) * 100, (box.y1 - p[1]) * 100]
+
+  it("places copies of a glyph with the matrix of their layer", async () => {
+    const { makeScene } = await import("../scene")
+    const { layerToWorld } = await import("../frame")
+    const a = makeLayer("A", { x: 2, y: -1, rotation: 33, scale: 1.4, flipX: true })
+    const b = makeLayer("A", { x: -5, y: 3, rotation: -70, scale: 0.7 })
+    const s = makeScene({ layers: [a, b] })
+    const f = buildFrame(s, lib, 0, [1e4, 1e4])
+    const svg = frameToSVG(f, s.material, { box })
+    // One traced glyph, two placements.
+    expect(svg.match(/<use href="#[^"]+g\d+"/g)).toHaveLength(2)
+    const ms = [...svg.matchAll(/transform="matrix\(([^)]+)\)"/g)].map((m) => m[1].split(" ").map(Number))
+    f.items.forEach((it, i) => {
+      const l = it.layers[0]
+      const [ma, mb, mc, md, me, mf] = ms[i]
+      for (const [gx, gy] of [
+        [0.5, 0.5],
+        [3, 4],
+        [1.2, 2.5],
+      ]) {
+        const sx = gx * 100,
+          sy = -gy * 100
+        const [px, py] = map(layerToWorld(l, gx, gy))
+        expect(ma * sx + mc * sy + me).toBeCloseTo(px, 1)
+        expect(mb * sx + md * sy + mf).toBeCloseTo(py, 1)
+      }
+    })
+    expect(svg).toContain('viewBox="0 0 2000 1600"')
+  })
+
+  it("keeps rectangles and ellipses native", async () => {
+    const { makeScene, makeShape } = await import("../scene")
+    const s = makeScene({ layers: [makeShape({ kind: "rect", w: 4, h: 2 }), makeShape({ kind: "ellipse", w: 3, h: 3 }, { x: 5 })] })
+    const svg = frameToSVG(buildFrame(s, lib, 0, [1e4, 1e4]), s.material, { box })
+    expect(svg).toContain("<rect x=")
+    expect(svg).toContain("<ellipse ")
+  })
+
+  it("draws geometric lines as centre-line strokes with true arcs", async () => {
+    const { makeScene, defaultLook } = await import("../scene")
+    const s = makeScene({ set: "geo", layers: [makeLayer("O", { set: "geo" })], look: { ...defaultLook, mode: "lines", stripes: 1.6, stripeFill: 0.5 } })
+    const svg = frameToSVG(buildFrame(s, lib, 0, [1e4, 1e4]), s.material, { box })
+    expect(svg).toMatch(/fill="none" stroke-width="31.25"/)
+    expect(svg).toMatch(/A\d/)
+    expect(svg).toContain('stroke="#')
+  })
+
+  it("clips masked content", async () => {
+    const { makeScene, makeShape, makeGroup, defaultCloner } = await import("../scene")
+    const g = makeGroup("stack", { mask: true, cloner: { ...defaultCloner, cols: 4, rows: 4, dx: 2.5, dy: 2.5 } })
+    const mask = { ...makeShape({ kind: "rect", w: 2, h: 2 }), parent: g.id }
+    const tile = { ...makeLayer("■", { set: "geo" }), parent: g.id }
+    const s = makeScene({ layers: [g, mask, tile] })
+    const f = buildFrame(s, lib, 0, [1e4, 1e4])
+    // Masked tiles are traced, not placed, and nothing outside the 2 × 2 mask survives.
+    const svg = frameToSVG(f, s.material, { box })
+    expect(svg).not.toContain("<use href")
+    const xs = [...svg.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => Number(m[1]) / 100 + box.x0)
+    expect(Math.min(...xs)).toBeGreaterThan(-1.05)
+    expect(Math.max(...xs)).toBeLessThan(1.05)
+  })
+})

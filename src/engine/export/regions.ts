@@ -33,7 +33,8 @@ export function foldFronts(f: Frame, item: FrameItem, x: number, y: number, fron
     if (fronts) fronts[i] = opRole(l.op) === "capture" ? frontOf(l.op, acc, b, l.gap) : BIG
     acc = combine(l.op, acc, b, l.k, l.gap, l.t)[0]
   })
-  return acc
+  // A masking group clips the whole item.
+  return item.mask ? Math.max(acc, layerField(item.mask, wx, wy)) : acc
 }
 
 const same = (a: RGB, b: RGB) =>
