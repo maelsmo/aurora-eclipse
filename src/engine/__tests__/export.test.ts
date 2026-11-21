@@ -84,15 +84,16 @@ describe("colour regions", () => {
 
   it("region colour equals sampleFrame().color away from the borders", () => {
     const f = scene()
-    const regions = buildRegions(f)
-    const fronts = new Float64Array(f.layers.length)
+    const it = f.items[0]
+    const regions = buildRegions(f, it)
+    const fronts = new Float64Array(it.layers.length)
     let checked = 0
     for (let x = -3; x <= 6; x += 0.13)
       for (let y = -1; y <= 6; y += 0.13) {
-        const d = foldFronts(f, x, y, fronts)
+        const d = foldFronts(f, it, x, y, fronts)
         if (d > -0.03) continue
-        if (f.layers.some((l, i) => i > 0 && opRole(l.op) === "capture" && Math.abs(fronts[i]) < 0.03)) continue
-        const k = regionAt(f, regions, x, y)
+        if (it.layers.some((l, i) => i > 0 && opRole(l.op) === "capture" && Math.abs(fronts[i]) < 0.03)) continue
+        const k = regionAt(f, it, regions, x, y)
         expect(k).toBeGreaterThanOrEqual(0)
         const c = sampleFrame(f, x, y, 1e-5).color
         const rc = regions[k].color
@@ -105,7 +106,7 @@ describe("colour regions", () => {
   it("one colour gives one region", () => {
     const s = presets.find((p) => p.id === "wordmark")!.make()
     const f = buildFrame(s, defaultAlphabet, 0, 0, [1e4, 1e4])
-    expect(buildRegions(f)).toHaveLength(1)
+    expect(buildRegions(f, f.items[0])).toHaveLength(1)
   })
 
   it("builds a finite SVG for every preset", () => {

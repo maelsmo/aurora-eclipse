@@ -1,24 +1,19 @@
-// GLSL ES 3.00 interpreter of the glyph construction. Mirrors sdf.ts,
-// operators.ts and frame.ts; materials live only here.
-import { LAYER_TEXELS, MAX_GLYPH_PRIMS, MAX_LAYERS, KIND } from "./pack"
+// Shared GLSL chunks: distance functions (mirror sdf.ts), data access with 2D
+// addressing (mirror pack.ts), noise and warps (mirror frame.ts), the
+// cluster fold (mirror frame.ts / operators.ts).
+import { KIND, LAYER_TEXELS, LOOK_TEXELS, MAX_CLUSTER, MAX_GLYPH_PRIMS, PRIM_TEXELS } from "../pack"
 
-export const vertexSource = `#version 300 es
-in vec2 position;
-void main() { gl_Position = vec4(position, 0.0, 1.0); }`
-
-export const fragmentSource = `#version 300 es
+export const header = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
-
 #define BIG 1e5
-#define MAX_LAYERS ${MAX_LAYERS}
+#define MAX_CLUSTER ${MAX_CLUSTER}
 #define MAX_GLYPH_PRIMS ${MAX_GLYPH_PRIMS}
-#define LAYER_TEXELS ${LAYER_TEXELS}
+`
 
-uniform sampler2D uPrims;
-uniform sampler2D uLayers;
-uniform int uLayerCount;
+/** Uniforms every program shares (view and environment). */
+export const env = `
 uniform vec2 uRes;
 uniform vec3 uView;      // centre x, centre y, pixels per module
 uniform float uTime;
@@ -26,29 +21,9 @@ uniform vec2 uPointer;
 uniform vec3 uWave;      // amplitude, frequency, speed
 uniform vec3 uFlow;      // amplitude, scale, speed
 uniform vec2 uPull;      // strength, radius
+`
 
-uniform int uFill;       // 0 fill, 1 outline, 2 isolines, 3 halftone
-uniform vec4 uLine;      // line, spacing, rings, dot
-uniform int uColorMode;  // 0 layer, 1 aurora, 2 depth
-uniform vec3 uAur0;
-uniform vec3 uAur1;
-uniform vec3 uAur2;
-uniform vec2 uAurora;    // scale, speed
-uniform vec3 uDepthColor;
-uniform float uDepth;
-uniform vec3 uOverlapColor;
-uniform float uOverlap;
-uniform vec3 uGlowColor;
-uniform vec2 uGlow;      // intensity, size
-uniform vec3 uShadowColor;
-uniform vec4 uShadow;    // opacity, dx, dy, softness
-uniform float uGrain;
-uniform vec4 uBg;        // rgb, alpha
-
-out vec4 outColor;
-
-/* ---------- distance functions (sdf.ts) ---------- */
-
+export const sdf = `
 float smin(float a, float b, float k) {
   if (k < 1e-5) return min(a, b);
   float h = max(k - abs(a - b), 0.0) / k;
@@ -90,8 +65,22 @@ float sdArc(vec2 p, vec4 t0, vec4 t1, vec4 t2, vec4 t3, bool full) {
   return mix(flat_, capped, t1.w);
 }
 
-vec4 prim(int i, int slot) { return texelFetch(uPrims, ivec2(slot, i), 0); }
+float sdBox(vec2 p, vec4 b) {
+  vec2 c = (b.xy + b.zw) * 0.5;
+  vec2 q = abs(p - c) - (b.zw - b.xy) * 0.5;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+}
+`
+
+export const data = `
+uniform sampler2D uPrims;
+uniform sampler2D uLayers;
+uniform sampler2D uLooks;
+vec4 prim(int i, int slot) { return texelFetch(uPrims, ivec2((i & 127) * ${PRIM_TEXELS} + slot, i >> 7), 0); }
 vec4 lay(int i, int slot) { return texelFetch(uLayers, ivec2(slot, i), 0); }
+vec4 look(int i, int slot) { return texelFetch(uLooks, ivec2(slot, i), 0); }
+#define LAYER_TEXELS ${LAYER_TEXELS}
+#define LOOK_TEXELS ${LOOK_TEXELS}
 
 float glyphField(int start, int count, vec2 p, vec4 g, float shear) {
   // g: fillet, cutK, attract, ink
@@ -121,15 +110,9 @@ float glyphField(int start, int count, vec2 p, vec4 g, float shear) {
   d = g.z > 0.0 ? smin(d, sat, g.z) : min(d, sat);
   return d - g.w;
 }
+`
 
-float sdBox(vec2 p, vec4 b) {
-  vec2 c = (b.xy + b.zw) * 0.5;
-  vec2 q = abs(p - c) - (b.zw - b.xy) * 0.5;
-  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
-}
-
-/* ---------- noise (frame.ts) ---------- */
-
+export const noise = `
 float hash2(ivec2 i) {
   uint h = (uint(i.x) * 1597334673u) ^ (uint(i.y) * 3812015801u);
   h = (h ^ (h >> 16u)) * 2246822519u;
@@ -165,9 +148,13 @@ vec2 warp(vec2 p) {
   }
   return p;
 }
+`
 
-/* ---------- fold (frame.ts / operators.ts) ---------- */
-
+/**
+ * Fold of a cluster: layers [start, start + count) combined bottom-up.
+ * Define WANT_COLOR before this chunk to also track colour and overlap.
+ */
+export const fold = `
 float layerField(int i, vec2 w) {
   vec4 L1 = lay(i, 1), L2 = lay(i, 2), L6 = lay(i, 6);
   vec2 d = w - L1.xy;
@@ -182,17 +169,22 @@ float front(float acc, float b, float aa) { return clamp(0.5 + 0.5 * (acc - b) /
 
 struct Sample { float d; vec3 col; float ov; };
 
-Sample sampleScene(vec2 world, float px) {
+Sample foldCluster(int start, int count, vec2 world, float px) {
   vec2 w = warp(world);
   float acc = BIG;
   vec3 col = vec3(0.0);
   float ov = 0.0;
-  for (int i = 0; i < MAX_LAYERS; i++) {
-    if (i >= uLayerCount) break;
+  for (int n = 0; n < MAX_CLUSTER; n++) {
+    if (n >= count) break;
+    int i = start + n;
     float b = layerField(i, w);
+#ifdef WANT_COLOR
     vec3 c = lay(i, 5).rgb;
-    if (i == 0) { acc = b; col = c; continue; }
+    if (n == 0) { acc = b; col = c; continue; }
     ov = max(ov, clamp(0.5 - acc / px, 0.0, 1.0) * clamp(0.5 - b / px, 0.0, 1.0));
+#else
+    if (n == 0) { acc = b; continue; }
+#endif
     int op = int(lay(i, 0).z + 0.5);
     vec4 P = lay(i, 4); // k, gap, t
     float d, wt;
@@ -205,74 +197,18 @@ Sample sampleScene(vec2 world, float px) {
     else if (op == 6) { d = max(smin(acc, b, P.x), -smax(acc, b, P.x)); wt = front(acc, b, px); }
     else { float t = clamp(P.z, 0.0, 1.0); d = mix(acc, b, t); wt = t; }
     acc = d;
-    col = mix(col, c, wt);
+#ifdef WANT_COLOR
+    col = mix(col, lay(i, 5).rgb, wt);
+#endif
   }
   return Sample(acc, col, ov);
 }
+`
 
-/* ---------- material ---------- */
-
-vec3 aurora(vec2 p) {
-  float t = uTime * uAurora.y;
-  vec2 q = p * uAurora.x;
-  float n1 = noise2(q + vec2(t, 0.3 * t));
-  float n2 = noise2(q * 1.7 - vec2(0.2 * t, t) + n1 * 1.5);
-  vec3 c = mix(uAur0, uAur1, smoothstep(0.2, 0.8, n1));
-  return mix(c, uAur2, smoothstep(0.35, 0.9, n2));
+/** World point of this fragment: identical for every instance. */
+export const worldPoint = `
+vec2 worldAt(out float px) {
+  px = 1.0 / uView.z;
+  return uView.xy + (gl_FragCoord.xy - 0.5 * uRes) * px;
 }
-
-vec4 over(vec4 dst, vec4 src) { return src + dst * (1.0 - src.a); }
-
-void main() {
-  vec2 frag = gl_FragCoord.xy;
-  float px = 1.0 / uView.z;
-  vec2 world = uView.xy + (frag - 0.5 * uRes) * px;
-  Sample s = sampleScene(world, px);
-  float d = s.d;
-  // fwidth jumps across early-exit borders; clamping keeps those seams invisible.
-  float aa = clamp(fwidth(d), px * 0.5, px * 3.0);
-
-  float a;
-  if (uFill == 1) {
-    a = clamp(0.5 - (abs(d) - uLine.x * 0.5) / aa, 0.0, 1.0);
-  } else if (uFill == 2) {
-    float sp = max(uLine.y, 0.02);
-    float band = abs(fract(d / sp + 0.5) - 0.5) * sp;
-    float ring = clamp(0.5 - (band - uLine.x * 0.5) / aa, 0.0, 1.0);
-    float reach = uLine.z * sp;
-    a = ring * (1.0 - smoothstep(reach - sp * 0.5, reach + sp * 0.5, abs(d)));
-  } else if (uFill == 3) {
-    float c = max(uLine.w, 0.02);
-    vec2 g = world / c;
-    vec2 f = (g - floor(g) - 0.5) * c;
-    float depth = clamp(0.5 - d / (2.5 * c), 0.0, 1.0);
-    float r = c * 0.58 * sqrt(depth);
-    float l = length(f);
-    a = clamp(0.5 - (l - r) / max(fwidth(l), px * 0.5), 0.0, 1.0) * step(0.001, depth);
-  } else {
-    a = clamp(0.5 - d / aa, 0.0, 1.0);
-  }
-
-  vec3 col = s.col;
-  if (uColorMode == 1) col = aurora(world);
-  else if (uColorMode == 2) col = mix(s.col, uDepthColor, smoothstep(0.0, max(uDepth, 0.01), -d));
-  if (uOverlap > 0.0) col = mix(col, uOverlapColor, s.ov * uOverlap);
-
-  vec4 o = vec4(uBg.rgb * uBg.a, uBg.a);
-  if (uGlow.x > 0.0) {
-    float g = clamp(uGlow.x * exp(-max(d, 0.0) / max(uGlow.y, 0.01)), 0.0, 1.0);
-    o = over(o, vec4(uGlowColor * g, g));
-  }
-  if (uShadow.x > 0.0) {
-    Sample sh = sampleScene(world - uShadow.yz, px);
-    float soft = uShadow.w + aa;
-    float sa = uShadow.x * (1.0 - smoothstep(-soft, soft, sh.d));
-    o = over(o, vec4(uShadowColor * sa, sa));
-  }
-  o = over(o, vec4(col * a, a));
-  if (uGrain > 0.0) {
-    float n = hash2(ivec2(frag) + ivec2(int(floor(uTime * 24.0)) * 7919, 0)) - 0.5;
-    o.rgb = clamp(o.rgb + n * uGrain * 0.3 * o.a, vec3(0.0), vec3(o.a));
-  }
-  outColor = o;
-}`
+`

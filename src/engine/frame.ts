@@ -1,16 +1,19 @@
 // A frame is the fully resolved scene for one moment: compiled glyphs, world
-// transforms, colours. Both the GPU packer and the CPU reference consume it.
+// transforms, colours, grouped into draw items in z-order. Both the GPU
+// packer and the CPU reference consume it.
 import { resolveAxes } from "./axes"
 import { compileGlyph } from "./compile"
 import { combine, type Op } from "./operators"
 import { BIG, sdBox, sdGlyph, clamp } from "./sdf"
 import { CAP } from "./grid"
 import type { Alphabet, Box, CompiledGlyph } from "./types"
-import type { Scene, Warp } from "./scene"
+import type { ColorMode, FillMode, Material, Scene, Warp } from "./scene"
 
 export type RGB = [number, number, number]
 
 export type FrameLayer = {
+  /** Source layer id (picking, overlays). */
+  id: string
   glyph: CompiledGlyph
   x: number
   y: number
@@ -31,8 +34,32 @@ export type FrameLayer = {
   reach: number
 }
 
-export type Frame = {
+/** How an item is drawn: the per-object part of the material. */
+export type FrameLook = {
+  fill: FillMode
+  line: number
+  spacing: number
+  rings: number
+  dot: number
+  colorMode: ColorMode
+}
+
+/**
+ * A draw item. A cluster folds its layers bottom-up with their operators
+ * (the merged "eclipse" composition) and is drawn as one instance.
+ */
+export type FrameItem = {
+  kind: "cluster"
+  /** Source node id. */
+  id: string
   layers: FrameLayer[]
+  look: FrameLook
+  opacity: number
+}
+
+export type Frame = {
+  /** Draw items in z-order (bottom first). */
+  items: FrameItem[]
   warp: Warp
   time: number
   pointer: [number, number]
@@ -40,9 +67,58 @@ export type Frame = {
   margin: number
 }
 
+export const lookOf = (m: Material): FrameLook => ({
+  fill: m.fill,
+  line: m.line,
+  spacing: m.spacing,
+  rings: m.rings,
+  dot: m.dot,
+  colorMode: m.colorMode,
+})
+
+/** Every layer of the frame, bottom-up. */
+export function frameLayers(f: Frame): FrameLayer[] {
+  return f.items.length === 1 ? f.items[0].layers : f.items.flatMap((it) => it.layers)
+}
+
 export function hexToRgb(hex: string): RGB {
   const n = parseInt(hex.slice(1), 16)
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
+}
+
+export function makeFrameLayer(
+  id: string,
+  glyph: CompiledGlyph,
+  t: { x: number; y: number; scale: number; rotation: number; op: Op; k: number; gap: number; t: number; color: string },
+  margin: number,
+): FrameLayer {
+  const scale = Math.max(t.scale, 0.05)
+  const reach =
+    Math.max(t.k, Math.abs(t.gap), glyph.fillet, Math.abs(glyph.ink), glyph.attract) + 0.25 + margin / scale
+  const a = (t.rotation * Math.PI) / 180
+  return {
+    id,
+    glyph,
+    x: t.x,
+    y: t.y,
+    cos: Math.cos(a),
+    sin: Math.sin(a),
+    scale,
+    ax: (glyph.box.x0 + glyph.box.x1) / 2,
+    ay: CAP / 2,
+    op: t.op,
+    k: t.k,
+    gap: t.gap,
+    t: t.t,
+    color: hexToRgb(t.color),
+    box: {
+      x0: glyph.box.x0 - reach,
+      y0: glyph.box.y0 - reach,
+      x1: glyph.box.x1 + reach,
+      y1: glyph.box.y1 + reach,
+    },
+    reach,
+  }
 }
 
 export function buildFrame(
@@ -58,35 +134,12 @@ export function buildFrame(
     if (!l.visible || !(l.char in alphabet)) continue
     const axes = resolveAxes(scene.axes, l.axes)
     const glyph = compileGlyph(l.char, alphabet, axes, revision)
-    const reach =
-      Math.max(l.k, Math.abs(l.gap), glyph.fillet, Math.abs(glyph.ink), glyph.attract) +
-      0.25 +
-      margin / Math.max(l.scale, 0.05)
-    const a = (l.rotation * Math.PI) / 180
-    layers.push({
-      glyph,
-      x: l.x,
-      y: l.y,
-      cos: Math.cos(a),
-      sin: Math.sin(a),
-      scale: Math.max(l.scale, 0.05),
-      ax: (glyph.box.x0 + glyph.box.x1) / 2,
-      ay: CAP / 2,
-      op: l.op,
-      k: l.k,
-      gap: l.gap,
-      t: l.t,
-      color: hexToRgb(l.color),
-      box: {
-        x0: glyph.box.x0 - reach,
-        y0: glyph.box.y0 - reach,
-        x1: glyph.box.x1 + reach,
-        y1: glyph.box.y1 + reach,
-      },
-      reach,
-    })
+    layers.push(makeFrameLayer(l.id, glyph, l, margin))
   }
-  return { layers, warp: scene.warp, time, pointer, margin }
+  const items: FrameItem[] = layers.length
+    ? [{ kind: "cluster", id: "root", layers, look: lookOf(scene.material), opacity: 1 }]
+    : []
+  return { items, warp: scene.warp, time, pointer, margin }
 }
 
 /* ---------- portable noise (identical integer hash in GLSL) ---------- */
@@ -162,23 +215,28 @@ export type Sample = {
 }
 
 /**
- * Folds all layers bottom-up. `px` is the size of a pixel in world units and
- * only shapes the overlap mask.
+ * Folds the layers of one cluster bottom-up. `px` is the size of a pixel in
+ * world units and only shapes the overlap mask and colour fronts.
  */
-export function sampleFrame(f: Frame, x: number, y: number, px = 0.02): Sample {
+export function sampleItem(f: Frame, item: FrameItem, x: number, y: number, px = 0.02): Sample {
   const [wx, wy] = warpPoint(f, x, y)
+  return foldLayers(item.layers, wx, wy, px)
+}
+
+function foldLayers(layers: FrameLayer[], wx: number, wy: number, px: number): Sample {
   let acc = BIG
   const color: RGB = [0, 0, 0]
   let overlap = 0,
     overlapD = BIG
-  f.layers.forEach((l, i) => {
+  for (let i = 0; i < layers.length; i++) {
+    const l = layers[i]
     const b = layerField(l, wx, wy)
     if (i === 0) {
       acc = b
       color[0] = l.color[0]
       color[1] = l.color[1]
       color[2] = l.color[2]
-      return
+      continue
     }
     const cov = (d: number) => clamp(0.5 - d / px, 0, 1)
     overlap = Math.max(overlap, cov(acc) * cov(b))
@@ -188,16 +246,45 @@ export function sampleFrame(f: Frame, x: number, y: number, px = 0.02): Sample {
     color[0] += (l.color[0] - color[0]) * w
     color[1] += (l.color[1] - color[1]) * w
     color[2] += (l.color[2] - color[2]) * w
-  })
+  }
   return { d: acc, color, overlap, overlapD }
 }
 
-/** Index of the topmost layer whose own shape contains the world point. */
-export function pickLayer(f: Frame, x: number, y: number, slack = 0): number {
+/**
+ * Samples the whole frame: the union of all items, coloured by the topmost
+ * item that contains the point (the nearest one outside every shape).
+ */
+export function sampleFrame(f: Frame, x: number, y: number, px = 0.02): Sample {
+  if (f.items.length === 1) return sampleItem(f, f.items[0], x, y, px)
   const [wx, wy] = warpPoint(f, x, y)
-  for (let i = f.layers.length - 1; i >= 0; i--)
-    if (layerField(f.layers[i], wx, wy) < slack) return i
-  return -1
+  let best: Sample = { d: BIG, color: [0, 0, 0], overlap: 0, overlapD: BIG }
+  for (let k = f.items.length - 1; k >= 0; k--) {
+    const s = foldLayers(f.items[k].layers, wx, wy, px)
+    if (best.d < 0) {
+      best = { ...best, d: Math.min(best.d, s.d) }
+      continue
+    }
+    if (s.d < best.d) best = s
+  }
+  return best
+}
+
+/** Id of the topmost layer whose own shape contains the world point. */
+export function pickLayer(f: Frame, x: number, y: number, slack = 0): string | null {
+  const [wx, wy] = warpPoint(f, x, y)
+  for (let k = f.items.length - 1; k >= 0; k--) {
+    const ls = f.items[k].layers
+    for (let i = ls.length - 1; i >= 0; i--) if (layerField(ls[i], wx, wy) < slack) return ls[i].id
+  }
+  return null
+}
+
+/** Distance from a world point to the nearest shape of the frame (no operators). */
+export function nearestDistance(f: Frame, x: number, y: number) {
+  const [wx, wy] = warpPoint(f, x, y)
+  let d = Infinity
+  for (const it of f.items) for (const l of it.layers) d = Math.min(d, layerField(l, wx, wy))
+  return d
 }
 
 /** World bounds of one layer (transformed glyph box), before warps. */
@@ -231,7 +318,7 @@ export function warpReach(w: Warp) {
 /** World bounds of the frame (union of transformed glyph boxes). */
 export function frameBounds(f: Frame, pad = 0): Box {
   const b: Box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }
-  for (const l of f.layers) {
+  for (const l of frameLayers(f)) {
     const lb = layerBounds(l)
     b.x0 = Math.min(b.x0, lb.x0)
     b.y0 = Math.min(b.y0, lb.y0)

@@ -4,7 +4,7 @@
 // morph) tint every region below without new borders; cut owns nothing.
 // Regions are painted bottom-up with overprint: region i = {d < 0} ∩ {f_i < 0}.
 import { combine, frontOf, opRole, toneOf } from "../operators"
-import { layerBounds, layerField, warpPoint, warpReach, frameBounds, type Frame, type RGB } from "../frame"
+import { layerBounds, layerField, warpPoint, warpReach, type Frame, type FrameItem, type RGB } from "../frame"
 import { BIG } from "../sdf"
 import type { Box } from "../types"
 import type { Field } from "./trace"
@@ -20,10 +20,10 @@ export type Region = {
  * Folds the frame at a world point like sampleFrame and records the front of
  * every capturing layer into `fronts` (BIG for other layers).
  */
-export function foldFronts(f: Frame, x: number, y: number, fronts?: Float64Array): number {
+export function foldFronts(f: Frame, item: FrameItem, x: number, y: number, fronts?: Float64Array): number {
   const [wx, wy] = warpPoint(f, x, y)
   let acc = BIG
-  f.layers.forEach((l, i) => {
+  item.layers.forEach((l, i) => {
     const b = layerField(l, wx, wy)
     if (i === 0) {
       acc = b
@@ -46,13 +46,22 @@ const union = (a: Box, b: Box): Box => ({
   y1: Math.max(a.y1, b.y1),
 })
 
-/** Regions in paint order; neighbours of one colour are merged. */
-export function buildRegions(f: Frame): Region[] {
-  if (!f.layers.length) return []
+/** World bounds of an item before warps. */
+export function itemBounds(item: FrameItem, pad = 0): Box {
+  let b: Box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }
+  for (const l of item.layers) b = union(b, layerBounds(l))
+  if (!Number.isFinite(b.x0)) return { x0: 0, y0: 0, x1: 0, y1: 0 }
+  return { x0: b.x0 - pad, y0: b.y0 - pad, x1: b.x1 + pad, y1: b.y1 + pad }
+}
+
+/** Regions of one cluster in paint order; neighbours of one colour are merged. */
+export function buildRegions(f: Frame, item: FrameItem): Region[] {
+  if (!item.layers.length) return []
   const wr = warpReach(f.warp)
-  const all = frameBounds(f, 0.6 + wr)
-  const regions: Region[] = [{ layers: [-1], color: [...f.layers[0].color] as RGB, box: all }]
-  f.layers.forEach((l, i) => {
+  const fuse = Math.max(0, ...item.layers.map((l) => (l.op === "fuse" ? l.k * 0.3 : 0)))
+  const all = itemBounds(item, 0.6 + wr + fuse)
+  const regions: Region[] = [{ layers: [-1], color: [...item.layers[0].color] as RGB, box: all }]
+  item.layers.forEach((l, i) => {
     if (i === 0) return
     const role = opRole(l.op)
     if (role === "capture") {
@@ -81,11 +90,11 @@ export function buildRegions(f: Frame): Region[] {
 }
 
 /** Field whose zero set bounds the region: max(d, min over its fronts). */
-export function regionField(f: Frame, r: Region): Field {
-  if (r.layers.includes(-1)) return (x, y) => foldFronts(f, x, y)
-  const fronts = new Float64Array(f.layers.length)
+export function regionField(f: Frame, item: FrameItem, r: Region): Field {
+  if (r.layers.includes(-1)) return (x, y) => foldFronts(f, item, x, y)
+  const fronts = new Float64Array(item.layers.length)
   return (x, y) => {
-    const d = foldFronts(f, x, y, fronts)
+    const d = foldFronts(f, item, x, y, fronts)
     let m = BIG
     for (const i of r.layers) m = Math.min(m, fronts[i])
     return Math.max(d, m)
@@ -93,9 +102,9 @@ export function regionField(f: Frame, r: Region): Field {
 }
 
 /** Index of the topmost region containing a point (for tests and picking). */
-export function regionAt(f: Frame, regions: Region[], x: number, y: number): number {
-  const fronts = new Float64Array(f.layers.length)
-  const d = foldFronts(f, x, y, fronts)
+export function regionAt(f: Frame, item: FrameItem, regions: Region[], x: number, y: number): number {
+  const fronts = new Float64Array(item.layers.length)
+  const d = foldFronts(f, item, x, y, fronts)
   if (d >= 0) return -1
   for (let k = regions.length - 1; k >= 0; k--) {
     const r = regions[k]

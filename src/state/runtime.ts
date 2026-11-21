@@ -2,7 +2,7 @@
 // effective (modulated) scene of the current frame.
 import { applyMotion, applyRoutes, type MotionState } from "@/engine/modulation"
 import { emptySignals, lfoValue, MicInput, type Signals } from "@/engine/signals"
-import { layerField, warpPoint, type Frame } from "@/engine/frame"
+import { nearestDistance, type Frame } from "@/engine/frame"
 import type { Scene } from "@/engine/scene"
 import { clamp } from "@/engine/sdf"
 
@@ -61,9 +61,7 @@ class Runtime {
   }
 
   private nearness(frame: Frame, p: [number, number]) {
-    const [wx, wy] = warpPoint(frame, p[0], p[1])
-    let d = Infinity
-    for (const l of frame.layers) d = Math.min(d, layerField(l, wx, wy))
+    const d = nearestDistance(frame, p[0], p[1])
     return clamp(1 - Math.max(d, 0) / 4, 0, 1)
   }
 

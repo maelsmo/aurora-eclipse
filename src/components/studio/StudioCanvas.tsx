@@ -18,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { GlyphRenderer, type View } from "@/engine/gpu/renderer"
 import { rasterize } from "@/engine/cpu"
-import { buildFrame, frameBounds, pickLayer, type Frame } from "@/engine/frame"
+import { buildFrame, frameBounds, frameLayers, pickLayer, type Frame } from "@/engine/frame"
 import { fitView, materialReach, sceneFrame } from "@/engine/view"
 import { snap } from "@/engine/grid"
 import { CAP } from "@/engine/grid"
@@ -43,8 +43,8 @@ function drawOverlay(
   h: number,
   view: View,
   frame: Frame,
-  selectedIndex: number,
-  hoverIndex: number,
+  selectedId: string | null,
+  hoverId: string | null,
   grid: boolean,
   dark: boolean,
 ) {
@@ -75,8 +75,9 @@ function drawOverlay(
       ctx.stroke()
     }
   }
-  const box = (i: number, style: string, lw: number, metrics: boolean) => {
-    const l = frame.layers[i]
+  const layers = frameLayers(frame)
+  const box = (id: string | null, style: string, lw: number, metrics: boolean) => {
+    const l = layers.find((x) => x.id === id)
     if (!l) return
     const g = l.glyph.box
     const pt = (gx: number, gy: number) => {
@@ -104,9 +105,9 @@ function drawOverlay(
       ctx.setLineDash([])
     }
   }
-  if (grid) frame.layers.forEach((_, i) => box(i, `rgba(${ink},0.18)`, 1, true))
-  if (hoverIndex >= 0 && hoverIndex !== selectedIndex) box(hoverIndex, `rgba(${ink},0.35)`, 1, false)
-  if (selectedIndex >= 0) box(selectedIndex, "rgba(91,60,245,0.95)", 1.5, false)
+  if (grid) layers.forEach((l) => box(l.id, `rgba(${ink},0.18)`, 1, true))
+  if (hoverId && hoverId !== selectedId) box(hoverId, `rgba(${ink},0.35)`, 1, false)
+  if (selectedId) box(selectedId, "rgba(91,60,245,0.95)", 1.5, false)
 }
 
 export function StudioCanvas() {
@@ -118,7 +119,7 @@ export function StudioCanvas() {
   const center = useRef<[number, number]>([0, 0])
   const schedule = useRef<() => void>(() => {})
   const fitRef = useRef<() => void>(() => {})
-  const hover = useRef(-1)
+  const hover = useRef<string | null>(null)
   const drag = useRef<
     | { kind: "layer"; id: string; start: [number, number]; origin: [number, number] }
     | { kind: "pan"; start: [number, number]; origin: [number, number] }
@@ -201,15 +202,13 @@ export function StudioCanvas() {
         OH = Math.round(ch * dpr)
       if (o.width !== OW) o.width = OW
       if (o.height !== OH) o.height = OH
-      const visible = eff.layers.filter((l) => l.visible && l.char in st.alphabet)
-      const selIndex = visible.findIndex((l) => l.id === st.selected)
       drawOverlay(
         o.getContext("2d")!,
         OW,
         OH,
         { ...view, scale: zoom.current * dpr },
         frame,
-        selIndex,
+        st.selected,
         hover.current,
         st.showGrid,
         dark(),
@@ -289,22 +288,14 @@ export function StudioCanvas() {
     return [x, y]
   }
 
-  function visibleIds() {
-    const st = useStore.getState()
-    return (runtime.effective ?? st.scene).layers
-      .filter((l) => l.visible && l.char in st.alphabet)
-      .map((l) => l.id)
-  }
-
   function onPointerDown(e: React.PointerEvent) {
     host.current!.focus()
     const st = useStore.getState()
     const w = toWorld(e)
     ;(e.target as Element).setPointerCapture(e.pointerId)
     runtime.pointerDown = true
-    const idx = runtime.frame ? pickLayer(runtime.frame, w[0], w[1], 0.15) : -1
-    if (idx >= 0 && e.button === 0 && !e.shiftKey) {
-      const id = visibleIds()[idx]
+    const id = runtime.frame ? pickLayer(runtime.frame, w[0], w[1], 0.15) : null
+    if (id && e.button === 0 && !e.shiftKey) {
       const layer = st.scene.layers.find((l) => l.id === id)
       if (layer) {
         st.select(id)
@@ -312,7 +303,7 @@ export function StudioCanvas() {
         return
       }
     }
-    if (idx < 0) st.select(null)
+    if (!id) st.select(null)
     drag.current = { kind: "pan", start: [e.clientX, e.clientY], origin: [...center.current] }
   }
 
@@ -337,9 +328,9 @@ export function StudioCanvas() {
       ]
       schedule.current()
     } else {
-      const idx = runtime.frame ? pickLayer(runtime.frame, w[0], w[1], 0.15) : -1
-      if (idx !== hover.current) {
-        hover.current = idx
+      const id = runtime.frame ? pickLayer(runtime.frame, w[0], w[1], 0.15) : null
+      if (id !== hover.current) {
+        hover.current = id
         schedule.current()
       }
       if (st.pointerOn && usesPointer(st.scene)) schedule.current()
@@ -429,14 +420,14 @@ export function StudioCanvas() {
         onPointerCancel={onPointerUp}
         onPointerLeave={() => {
           runtime.setPointer(null, [0, 0])
-          if (hover.current !== -1) {
-            hover.current = -1
+          if (hover.current !== null) {
+            hover.current = null
             schedule.current()
           }
         }}
         onDoubleClick={(e) => {
           const w = toWorld(e)
-          if (runtime.frame && pickLayer(runtime.frame, w[0], w[1], 0.15) < 0) fitRef.current()
+          if (runtime.frame && !pickLayer(runtime.frame, w[0], w[1], 0.15)) fitRef.current()
         }}
         onKeyDown={onKeyDown}
       >
