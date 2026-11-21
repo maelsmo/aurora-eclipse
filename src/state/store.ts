@@ -25,6 +25,8 @@ type State = {
   lastTime: number
   /** Selected node ids; the last one is the primary selection. May hold stale ids: read through selectors. */
   selected: string[]
+  /** Node whose name is being edited in the layer tree. */
+  renaming: string | null
 
   sets: GlyphSet[]
   library: Library
@@ -95,6 +97,7 @@ export const useStore = create<State & Actions>()((set, get) => {
     lastKey: "",
     lastTime: 0,
     selected: [],
+    renaming: null,
 
     sets: loaded.sets,
     library: makeLibrary(loaded.sets, 1),

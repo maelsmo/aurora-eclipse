@@ -3,7 +3,7 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ParamSlider } from "@/components/shared/ParamSlider"
 import { ColorInput } from "@/components/shared/ColorInput"
-import { Section } from "@/components/shared/Section"
+import { Section, Hint } from "@/components/shared/Section"
 import { SceneThumb } from "@/components/shared/Thumbs"
 import { contexts, applyContext } from "@/engine/presets"
 import { lookParams, materialParams, type LookNumKey, type MaterialNumKey } from "@/engine/params"
@@ -70,96 +70,32 @@ export function MaterialTab() {
         </div>
       </Section>
 
-      <Section title="Отрисовка">
-        <ToggleGroup
-          variant="outline"
-          size="sm"
-          spacing={0}
-          value={[look.mode]}
-          onValueChange={(v) => v[0] && setL({ mode: v[0] as LookMode })}
-          className="w-full"
-          aria-label="Способ отрисовки"
-        >
-          {fills.map((f) => (
-            <ToggleGroupItem key={f.value} value={f.value} className="flex-1">
-              {f.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        {fillParams[look.mode].map(lookSlider)}
-        {look.mode === "lines" && (
-          <ToggleGroup
-            variant="outline"
-            size="sm"
-            spacing={0}
-            value={[look.lineDir ?? "auto"]}
-            onValueChange={(v) => v[0] && setL({ lineDir: v[0] === "auto" ? undefined : (v[0] as Look["lineDir"]) })}
-            className="w-full"
-            aria-label="Направление линий"
-          >
-            <ToggleGroupItem value="auto" className="flex-1">По модулям</ToggleGroupItem>
-            <ToggleGroupItem value="contour" className="flex-1">Контуры</ToggleGroupItem>
-            <ToggleGroupItem value="h" className="flex-1">Гориз.</ToggleGroupItem>
-            <ToggleGroupItem value="v" className="flex-1">Верт.</ToggleGroupItem>
-          </ToggleGroup>
-        )}
-      </Section>
-
-      <Section title="Цвет">
-        <ToggleGroup
-          variant="outline"
-          size="sm"
-          spacing={0}
-          value={[look.colorMode]}
-          onValueChange={(v) => v[0] && setL({ colorMode: v[0] as ColorMode })}
-          className="w-full"
-          aria-label="Источник цвета"
-        >
-          {colorModes.map((f) => (
-            <ToggleGroupItem key={f.value} value={f.value} className="flex-1">
-              {f.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        {look.colorMode === "layer" && (
-          <div className="flex flex-wrap gap-1.5">
-            {scene.layers.filter(isLeaf).map((l) => (
-              <div key={l.id} className="flex items-center gap-1 rounded-lg border py-0.5 pr-0.5 pl-2 text-xs">
-                {nodeLabel(l)}
-                <ColorInput value={l.color} label={"Цвет слоя " + nodeLabel(l)} className="h-7 w-7 border-0" onChange={(c) => updateLayer(l.id, { color: c }, "color:" + l.id)} />
-              </div>
+      <Section title="Аврора и глубина">
+        <Hint>Палитры для объектов, у которых во вкладке «Вид» выбран цвет «Аврора» или «Глубина».</Hint>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm text-foreground/80">Аврора</span>
+          <div className="flex gap-1.5">
+            {m.aurora.map((c, i) => (
+              <ColorInput
+                key={i}
+                value={c}
+                label={"Цвет авроры " + (i + 1)}
+                onChange={(v) => {
+                  const aurora = [...m.aurora] as Material["aurora"]
+                  aurora[i] = v
+                  setM({ aurora }, "aurora" + i)
+                }}
+              />
             ))}
           </div>
-        )}
-        {look.colorMode === "aurora" && (
-          <>
-            <div className="flex gap-1.5">
-              {m.aurora.map((c, i) => (
-                <ColorInput
-                  key={i}
-                  value={c}
-                  label={"Цвет авроры " + (i + 1)}
-                  onChange={(v) => {
-                    const aurora = [...m.aurora] as Material["aurora"]
-                    aurora[i] = v
-                    setM({ aurora }, "aurora" + i)
-                  }}
-                />
-              ))}
-            </div>
-            {slider("auroraScale")}
-            {slider("auroraSpeed")}
-          </>
-        )}
-        {look.colorMode === "depth" && (
-          <>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-foreground/80">Цвет глубины</span>
-              <ColorInput value={m.depthColor} label="Цвет глубины" onChange={(v) => setM({ depthColor: v }, "depthColor")} />
-            </div>
-            {slider("depth")}
-          </>
-        )}
+        </div>
+        {slider("auroraScale")}
+        {slider("auroraSpeed")}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-foreground/80">Цвет глубины</span>
+          <ColorInput value={m.depthColor} label="Цвет глубины" onChange={(v) => setM({ depthColor: v }, "depthColor")} />
+        </div>
+        {slider("depth")}
       </Section>
 
       <Section title="Полутень" action={<ColorInput value={m.overlapColor} label="Цвет полутени" onChange={(v) => setM({ overlapColor: v }, "overlapColor")} />}>

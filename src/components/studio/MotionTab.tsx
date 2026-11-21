@@ -32,7 +32,8 @@ function targetLabel(scene: Scene, target: string) {
   return def?.label ?? target
 }
 
-export function MotionTab() {
+/** «Движение»: scene time, rhythms, warps and routes; or the selected object's motion. */
+export function MotionTab({ scope }: { scope: "scene" | "object" }) {
   const scene = useStore((s) => s.scene)
   const layer = useStore(selectedLayer)
   const { setScene, updateLayer } = useStore.getState()
@@ -50,6 +51,7 @@ export function MotionTab() {
 
   return (
     <>
+      {scope === "scene" && (
       <Section title="Время">
         <ParamSlider
           def={sceneParams.speed}
@@ -58,6 +60,8 @@ export function MotionTab() {
         />
       </Section>
 
+      )}
+      {scope === "object" && (
       <Section title={layer ? `Движение: ${nodeLabel(layer)}` : "Движение слоя"}>
         {layer ? (
           <>
@@ -111,6 +115,9 @@ export function MotionTab() {
         )}
       </Section>
 
+      )}
+      {scope === "scene" && (
+      <>
       <Section title="Ритмы">
         {([0, 1, 2, 3] as const).map((i) => (
           <div key={i} className="flex flex-col gap-3 rounded-lg border p-3">
@@ -146,14 +153,16 @@ export function MotionTab() {
         ))}
       </Section>
 
-      <Section title={`Связи с сигналами · ${scene.routes.length}`}>
+      </>
+      )}
+      <Section title={`Связи с сигналами · ${scope === "object" && layer ? scene.routes.filter((r) => r.target.startsWith("layer:" + layer.id + ".")).length : scene.routes.length}`}>
         {scene.routes.length === 0 ? (
           <Hint>
             Нажмите на значок волны рядом с любым параметром, чтобы привязать его ко времени, курсору или микрофону.
           </Hint>
         ) : (
           <ul className="flex flex-col gap-2">
-            {scene.routes.map((r) => (
+            {scene.routes.filter((r) => scope === "scene" || (layer && r.target.startsWith("layer:" + layer.id + "."))).map((r) => (
               <li key={r.id} className="flex flex-col gap-2 rounded-lg border p-2.5">
                 <div className="flex items-center gap-2">
                   <span className="min-w-0 flex-1 truncate text-sm">
