@@ -10,6 +10,7 @@ import type { Box, CompiledGlyph } from "./types"
 import type { Look, LookPatch, Material, Scene, Warp } from "./scene/types"
 import { identity, nodeXf, xfCompose, type Xf } from "./scene/tree"
 import { resolveGlyphSet, type Library } from "./alphabet/sets"
+import { compileShape } from "./shapes"
 
 export type RGB = [number, number, number]
 
@@ -46,7 +47,8 @@ export type FrameLook = Look
  * (a merge group, or a single object) and is drawn as one instance.
  */
 export type FrameItem = {
-  kind: "cluster"
+  /** cluster: a merge group folded with operators; solo: one letter or shape drawn on its own. */
+  kind: "cluster" | "solo"
   /** Source node id: the merge group or the object. */
   id: string
   layers: FrameLayer[]
@@ -103,8 +105,8 @@ export function makeFrameLayer(id: string, glyph: CompiledGlyph, world: Xf, p: L
     sin: world.sin,
     scale,
     mirror: world.m,
-    ax: (glyph.box.x0 + glyph.box.x1) / 2,
-    ay: CAP / 2,
+    ax: glyph.anchor ? glyph.anchor[0] : (glyph.box.x0 + glyph.box.x1) / 2,
+    ay: glyph.anchor ? glyph.anchor[1] : CAP / 2,
     op: p.op,
     k: p.k,
     gap: p.gap,
@@ -157,19 +159,23 @@ export function buildFrame(
       stack.push({ id: n.id, ctx })
       continue
     }
-    if (!visible || n.type !== "letter") continue
-    const entry = resolveGlyphSet(lib, n.char, n.set, scene.set)
-    if (!entry) continue
-    const axes = resolveAxes(scene.axes, n.axes)
-    const glyph = compileGlyph(n.char, entry.alphabet, axes, entry.version)
-    const look: Look = { ...scene.look, ...entry.set.look, ...parent.look, ...n.look }
+    if (!visible) continue
+    let glyph: CompiledGlyph
+    let setLook: LookPatch | undefined
+    if (n.type === "letter") {
+      const entry = resolveGlyphSet(lib, n.char, n.set, scene.set)
+      if (!entry) continue
+      glyph = compileGlyph(n.char, entry.alphabet, resolveAxes(scene.axes, n.axes), entry.version)
+      setLook = entry.set.look
+    } else glyph = compileShape(n.shape)
+    const look: Look = { ...scene.look, ...setLook, ...parent.look, ...n.look }
     const color = n.look?.tint ?? parent.look.tint ?? n.color
     const world = xfCompose(parent.xf, nodeXf(n))
     const host = parent.merge
     const m = Math.max(margin, lookMargin(host ? host.look : look))
     const layer = makeFrameLayer(n.id, glyph, world, { op: n.op, k: n.k, gap: n.gap, t: n.t, color }, m)
     if (host) host.layers.push(layer)
-    else items.push({ kind: "cluster", id: n.id, layers: [layer], look, opacity: parent.opacity * (n.opacity ?? 1) })
+    else items.push({ kind: "solo", id: n.id, layers: [layer], look, opacity: parent.opacity * (n.opacity ?? 1) })
   }
   return { items: items.filter((it) => it.layers.length > 0), warp: scene.warp, time, pointer, margin }
 }
@@ -227,7 +233,7 @@ export function warpPoint(f: Frame, x: number, y: number): [number, number] {
 }
 
 /** Field of one layer at a world point (after warps). */
-export function layerField(l: FrameLayer, wx: number, wy: number) {
+export function layerField(l: FrameLayer, wx: number, wy: number, inset = 0) {
   const dx = wx - l.x,
     dy = wy - l.y
   const lx = (l.mirror * (l.cos * dx + l.sin * dy)) / l.scale + l.ax
@@ -235,7 +241,7 @@ export function layerField(l: FrameLayer, wx: number, wy: number) {
   const b = sdBox(lx, ly, l.box)
   // Outside the expanded box: a continuous lower bound of the true distance.
   if (b > 0) return (b + l.reach) * l.scale
-  return sdGlyph(l.glyph, lx, ly) * l.scale
+  return sdGlyph(l.glyph, lx, ly, inset) * l.scale
 }
 
 export type Sample = {
@@ -252,17 +258,17 @@ export type Sample = {
  */
 export function sampleItem(f: Frame, item: FrameItem, x: number, y: number, px = 0.02): Sample {
   const [wx, wy] = warpPoint(f, x, y)
-  return foldLayers(item.layers, wx, wy, px)
+  return foldLayers(item.layers, wx, wy, px, item.look.inset)
 }
 
-function foldLayers(layers: FrameLayer[], wx: number, wy: number, px: number): Sample {
+function foldLayers(layers: FrameLayer[], wx: number, wy: number, px: number, inset = 0): Sample {
   let acc = BIG
   const color: RGB = [0, 0, 0]
   let overlap = 0,
     overlapD = BIG
   for (let i = 0; i < layers.length; i++) {
     const l = layers[i]
-    const b = layerField(l, wx, wy)
+    const b = layerField(l, wx, wy, inset)
     if (i === 0) {
       acc = b
       color[0] = l.color[0]
@@ -291,7 +297,7 @@ export function sampleFrame(f: Frame, x: number, y: number, px = 0.02): Sample {
   const [wx, wy] = warpPoint(f, x, y)
   let best: Sample = { d: BIG, color: [0, 0, 0], overlap: 0, overlapD: BIG }
   for (let k = f.items.length - 1; k >= 0; k--) {
-    const s = foldLayers(f.items[k].layers, wx, wy, px)
+    const s = foldLayers(f.items[k].layers, wx, wy, px, f.items[k].look.inset)
     if (best.d < 0) {
       best = { ...best, d: Math.min(best.d, s.d) }
       continue

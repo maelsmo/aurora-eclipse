@@ -24,7 +24,7 @@ export function foldFronts(f: Frame, item: FrameItem, x: number, y: number, fron
   const [wx, wy] = warpPoint(f, x, y)
   let acc = BIG
   item.layers.forEach((l, i) => {
-    const b = layerField(l, wx, wy)
+    const b = layerField(l, wx, wy, item.look.inset)
     if (i === 0) {
       acc = b
       if (fronts) fronts[0] = -BIG

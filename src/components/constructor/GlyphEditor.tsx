@@ -6,7 +6,7 @@ import { makeLayer, makeScene } from "@/engine/scene"
 import { CAP, OVERHANG, snap } from "@/engine/grid"
 import type { ArcDef, PrimDef, Vec } from "@/engine/types"
 import { editingAlphabet, useStore } from "@/state/store"
-import { editAxes, editTarget, withPrims, type Tool } from "./editing"
+import { editAxes, editTarget, withPrims, type Tool, movePrim, geoPath } from "./editing"
 
 type Handle = "a" | "b" | "c" | "r" | "a0" | "a1" | "body" | "adv"
 type Drag = { index: number; handle: Handle; start: Vec; prim: PrimDef }
@@ -138,7 +138,7 @@ export function GlyphEditor({
       onSelect(own.length)
       return
     }
-    setDraft({ kind: tool, a: n, b: n })
+    if (tool === "stroke" || tool === "arc" || tool === "slot") setDraft({ kind: tool, a: n, b: n })
   }
 
   function onPointerMove(e: React.PointerEvent<SVGSVGElement>) {
@@ -176,9 +176,11 @@ export function GlyphEditor({
           next[drag.index] = { ...q, a1: a }
         }
       } else next[drag.index] = { ...q, c: [q.c[0] + d[0], q.c[1] + d[1]] }
-    } else {
+    } else if (q.kind === "dot" || q.kind === "hole") {
       next[drag.index] = { ...q, c: drag.handle === "c" ? n : [q.c[0] + d[0], q.c[1] + d[1]] }
-    }
+    } else if (q.kind === "box" && (drag.handle === "a" || drag.handle === "b")) {
+      next[drag.index] = { ...q, [drag.handle]: n }
+    } else next[drag.index] = movePrim(q, d)
     commit(next, key)
   }
 
@@ -212,10 +214,8 @@ export function GlyphEditor({
         ArrowUp: [0, step],
         ArrowDown: [0, -step],
       }[e.key] as Vec
-      const q = own[selected]
-      const move = (v: Vec): Vec => [v[0] + d[0], v[1] + d[1]]
       const next = [...own]
-      next[selected] = "c" in q ? { ...q, c: move(q.c) } : { ...q, a: move(q.a), b: move(q.b) }
+      next[selected] = movePrim(own[selected], d)
       commit(next, "nudge:" + target + selected)
     } else if (e.key === "Escape") onSelect(null)
   }
@@ -275,6 +275,19 @@ export function GlyphEditor({
             {sel && handle("r", p.c[0] + Math.cos(mid) * p.r, p.c[1] + Math.sin(mid) * p.r)}
             {sel && p.a1 - p.a0 < 359.9 && handle("a0", p.c[0] + Math.cos(p.a0 * DEG) * p.r, p.c[1] + Math.sin(p.a0 * DEG) * p.r)}
             {sel && p.a1 - p.a0 < 359.9 && handle("a1", p.c[0] + Math.cos(p.a1 * DEG) * p.r, p.c[1] + Math.sin(p.a1 * DEG) * p.r)}
+          </g>
+        )
+      }
+      case "box":
+      case "ellipse":
+      case "sector":
+      case "poly": {
+        const d = geoPath(p, (x, y) => [X(x), Y(y)], s)
+        return (
+          <g key={(ghost ? "g" : "p") + i} opacity={op}>
+            <path {...(ghost ? {} : body)} d={d} fill={ghost ? "none" : "transparent"} stroke={stroke} strokeWidth={w} strokeDasharray={p.neg || ghost ? "5 4" : undefined} />
+            {p.kind === "box" && sel && handle("a", p.a[0], p.a[1])}
+            {p.kind === "box" && sel && handle("b", p.b[0], p.b[1])}
           </g>
         )
       }

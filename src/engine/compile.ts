@@ -3,14 +3,25 @@
 
 import type { Axes } from "./axes"
 import { CAP } from "./grid"
-import type {
-  Alphabet,
-  Box,
-  CompiledGlyph,
-  CompiledPrim,
-  PrimDef,
-  Vec,
+import {
+  assertNever,
+  type Alphabet,
+  type Box,
+  type CompiledGlyph,
+  type CompiledPrim,
+  type GeoDef,
+  type GeoFlags,
+  type PrimDef,
+  type Vec,
 } from "./types"
+
+const MODE_INDEX = { fill: 1, lines: 2, outline: 3 } as const
+const DIR_INDEX = { h: 0, v: 1, arc: 2, contour: 3 } as const
+
+/** Mode, stripe direction and cut flag of a geometric module. */
+export function geoFlags(p: GeoDef): GeoFlags {
+  return { mode: p.mode ? MODE_INDEX[p.mode] : 0, dir: p.dir ? DIR_INDEX[p.dir] : 0, neg: !!p.neg }
+}
 
 const EPS = 1e-3
 const DEG = Math.PI / 180
@@ -245,6 +256,51 @@ export function compilePrims(prims: PrimDef[], axes: Axes): CompiledGlyph {
           r: SLOT_RADIUS * axes.weight * axes.counter * (p.s ?? 1),
         })
         break
+      case "box": {
+        const a = map(p.a),
+          b = map(p.b)
+        const hx = Math.abs(b[0] - a[0]) / 2,
+          hy = Math.abs(b[1] - a[1]) / 2
+        const k = Math.min(kx, ky)
+        const r = (p.r ?? [0, 0, 0, 0]).map((v) => Math.max(0, Math.min(v * k, hx, hy))) as [number, number, number, number]
+        out.push({ kind: "box", c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], h: [hx, hy], r, ...geoFlags(p) })
+        if (!p.neg) {
+          grow(box, Math.min(a[0], b[0]), Math.min(a[1], b[1]), 0)
+          grow(box, Math.max(a[0], b[0]), Math.max(a[1], b[1]), 0)
+        }
+        break
+      }
+      case "ellipse": {
+        const c = map(p.c)
+        const rx = Math.max(1e-3, p.rx * kx),
+          ry = Math.max(1e-3, p.ry * ky)
+        out.push({ kind: "ellipse", c, rx, ry, ...geoFlags(p) })
+        if (!p.neg) grow(box, c[0], c[1], 0), grow(box, c[0] - rx, c[1] - ry, 0), grow(box, c[0] + rx, c[1] + ry, 0)
+        break
+      }
+      case "sector": {
+        const c = map(p.c)
+        const a0 = p.a0 * DEG,
+          a1 = Math.max(p.a1, p.a0 + 1) * DEG
+        out.push({ kind: "sector", c, r: p.r, r0: Math.max(0, Math.min(p.r0 ?? 0, p.r - 1e-3)), a0, a1, sx: kx, sy: ky, ...geoFlags(p) })
+        if (!p.neg) {
+          grow(box, c[0], c[1], 0)
+          for (let k = 0; k <= 24; k++) {
+            const a = a0 + ((a1 - a0) * k) / 24
+            grow(box, c[0] + Math.cos(a) * p.r * kx, c[1] + Math.sin(a) * p.r * ky, 0)
+          }
+        }
+        break
+      }
+      case "poly": {
+        const pts = p.pts.slice(0, 4).map(map)
+        if (pts.length < 3) break
+        out.push({ kind: "poly", pts, ...geoFlags(p) })
+        if (!p.neg) for (const q of pts) grow(box, q[0], q[1], 0)
+        break
+      }
+      default:
+        assertNever(p)
     }
   })
   if (!Number.isFinite(box.x0)) Object.assign(box, { x0: 0, y0: 0, x1: 1, y1: 1 })

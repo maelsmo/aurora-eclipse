@@ -13,6 +13,7 @@ import { axisKeys, defaultAxes, type AxisKey } from "@/engine/axes"
 import { axisParams, layerParams, layerTarget, type LayerNumKey } from "@/engine/params"
 import { selectedLayer, useStore } from "@/state/store"
 import { nodeLabel } from "@/components/shared/labels"
+import { ShapeControls } from "./ShapeControls"
 
 const transformKeys: LayerNumKey[] = ["x", "y", "scale", "rotation"]
 
@@ -22,6 +23,7 @@ export function FormTab() {
   const { setScene, updateLayer } = useStore.getState()
   const [picking, setPicking] = useState(false)
   const letter = layer?.type === "letter" ? layer : null
+  const shape = layer?.type === "shape" ? layer : null
   const own = !!letter?.axes
 
   const setAxis = (k: AxisKey, v: number) =>
@@ -59,6 +61,7 @@ export function FormTab() {
               />
             </div>
           </div>}
+          {shape && <ShapeControls node={shape} />}
           {transformKeys.map((k) => (
             <ParamSlider
               key={k}

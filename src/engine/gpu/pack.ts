@@ -7,7 +7,7 @@
 // Every texture stays within the 2048 px guaranteed by WebGL2.
 import { opIndex } from "../operators"
 import { layerBounds, warpReach, type Frame, type FrameItem, type FrameLook } from "../frame"
-import type { CompiledGlyph, Box } from "../types"
+import { assertNever, type CompiledGlyph, type Box } from "../types"
 
 export const PRIM_TEXELS = 8
 export const PRIMS_PER_ROW = 128
@@ -28,11 +28,11 @@ export const INSTANCE_FLOATS = 20
 export const MAX_INSTANCES = 4096
 
 /** Primitive kinds as stored on the GPU (ring = full-circle arc). */
-export const KIND = { stroke: 0, arc: 1, dot: 2, hole: 3, slot: 4, ring: 5 } as const
+export const KIND = { stroke: 0, arc: 1, dot: 2, hole: 3, slot: 4, ring: 5, box: 6, ellipse: 7, sector: 8, poly: 9, ngon: 10 } as const
 export const FILL = { fill: 0, outline: 1, isolines: 2, halftone: 3, lines: 4 } as const
 export const COLOR_MODE = { layer: 0, aurora: 1, depth: 2 } as const
 /** Instance kinds (selects the fragment program). */
-export const INSTANCE = { cluster: 0 } as const
+export const INSTANCE = { cluster: 0, solo: 1 } as const
 
 export type Packed = {
   prims: Float32Array
@@ -110,10 +110,32 @@ function writeGlyph(P: Float32Array, g: CompiledGlyph, start: number, count: num
         )
         break
       }
-      default: {
-        const never: never = p
-        throw new Error("Unknown primitive " + (never as { kind: string }).kind)
+      case "box":
+        P.set([KIND.box, p.c[0], p.c[1], p.h[0], p.h[1], p.r[0], p.r[1], p.r[2], p.r[3], p.mode, p.dir, p.neg ? 1 : 0], o)
+        break
+      case "ellipse":
+        P.set([KIND.ellipse, p.c[0], p.c[1], p.rx, p.ry, 0, 0, 0, 0, p.mode, p.dir, p.neg ? 1 : 0], o)
+        break
+      case "sector": {
+        const h = (p.a1 - p.a0) / 2
+        const rot = Math.PI / 2 - (p.a0 + p.a1) / 2
+        const full = h >= Math.PI - 1e-4 ? 1 : 0
+        P.set([KIND.sector, p.c[0], p.c[1], p.r, p.r0, p.sx, p.sy, full, 0, p.mode, p.dir, p.neg ? 1 : 0, Math.cos(rot), Math.sin(rot), Math.sin(h), Math.cos(h)], o)
+        break
       }
+      case "poly": {
+        const q = [...p.pts]
+        while (q.length < 4) q.push(q[q.length - 1])
+        P.set([KIND.poly, p.pts.length, 0, 0, 0, 0, 0, 0, 0, p.mode, p.dir, p.neg ? 1 : 0, q[0][0], q[0][1], q[1][0], q[1][1], q[2][0], q[2][1], q[3][0], q[3][1]], o)
+        break
+      }
+      case "ngon": {
+        const k = p.inner >= 1 ? Math.cos(Math.PI / p.sides) : p.inner
+        P.set([KIND.ngon, p.c[0], p.c[1], p.sides, k, p.sx, p.sy, p.round, 0, p.mode, p.dir, p.neg ? 1 : 0], o)
+        break
+      }
+      default:
+        assertNever(p)
     }
   }
 }
@@ -172,9 +194,29 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
   out.primCount = pi
 
   const looks = new Map<string, number>()
+  /** Glyph records of solo instances (layer texture rows), shared by identical glyphs. */
+  const glyphRows = new Map<CompiledGlyph, number>()
   let li = 0,
     ki = 0,
     ii = 0
+  const writeLayer = (layer: FrameItem["layers"][number], row: number) => {
+    const [ps, pc] = ranges.get(layer.glyph)!
+    const g = layer.glyph
+    L.set(
+      [
+        ps, pc, opIndex(layer.op), layer.mirror,
+        layer.x, layer.y, layer.cos, layer.sin,
+        layer.scale, layer.ax, layer.ay, g.shear,
+        g.fillet, g.cutK, g.attract, g.ink,
+        layer.k, layer.gap, layer.t, 0,
+        layer.color[0], layer.color[1], layer.color[2], 0,
+        layer.box.x0, layer.box.y0, layer.box.x1, layer.box.y1,
+        layer.reach, 0, 0, 0,
+      ],
+      row * LAYER_TEXELS * 4,
+    )
+  }
+  const wr = warpReach(frame.warp)
   for (const item of frame.items) {
     if (ii >= MAX_INSTANCES) break
     const key = lookKey(item.look)
@@ -187,32 +229,49 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
       K.fill(0, o, o + LOOK_TEXELS * 4)
       K.set([FILL[lk.mode], lk.line, lk.spacing, lk.rings, lk.dot, COLOR_MODE[lk.colorMode], lk.inset, 0, lk.stripes, lk.stripeFill, 0, 0], o)
     }
+    if (item.kind === "solo") {
+      const l = item.layers[0]
+      let row = glyphRows.get(l.glyph)
+      if (row === undefined) {
+        if (li >= MAX_LAYERS) continue
+        row = li++
+        glyphRows.set(l.glyph, row)
+        writeLayer(l, row)
+      }
+      // Glyph coordinates → world: p = t + s·R·diag(m,1)·(q − anchor).
+      const s = l.scale
+      const a = s * l.mirror * l.cos,
+        b = s * l.mirror * l.sin,
+        c = -s * l.sin,
+        d = s * l.cos
+      const tx = l.x - (a * l.ax + c * l.ay),
+        ty = l.y - (b * l.ax + d * l.ay)
+      const g = l.glyph.box
+      const pad = (lookReach(item.look) + item.look.line * 0.5 + wr) / s + Math.max(0, l.glyph.ink) + 0.3 * l.glyph.fillet
+      I.set(
+        [
+          a, b, c, d,
+          tx, ty, item.opacity, look ?? 0,
+          row, 0, INSTANCE.solo, s,
+          g.x0 - pad, g.y0 - pad, g.x1 + pad, g.y1 + pad,
+          l.color[0], l.color[1], l.color[2], 0,
+        ],
+        ii * INSTANCE_FLOATS,
+      )
+      ii++
+      continue
+    }
     const start = li
     for (const layer of item.layers.slice(0, MAX_CLUSTER)) {
       if (li >= MAX_LAYERS) break
-      const [ps, pc] = ranges.get(layer.glyph)!
-      const g = layer.glyph
-      L.set(
-        [
-          ps, pc, opIndex(layer.op), layer.mirror,
-          layer.x, layer.y, layer.cos, layer.sin,
-          layer.scale, layer.ax, layer.ay, g.shear,
-          g.fillet, g.cutK, g.attract, g.ink,
-          layer.k, layer.gap, layer.t, 0,
-          layer.color[0], layer.color[1], layer.color[2], 0,
-          layer.box.x0, layer.box.y0, layer.box.x1, layer.box.y1,
-          layer.reach, 0, 0, 0,
-        ],
-        li * LAYER_TEXELS * 4,
-      )
-      li++
+      writeLayer(layer, li++)
     }
     const box = itemBox(frame, item)
     I.set(
       [
         1, 0, 0, 1,
         0, 0, item.opacity, look ?? 0,
-        start, li - start, INSTANCE.cluster, 0,
+        start, li - start, INSTANCE.cluster, 1,
         box.x0, box.y0, box.x1, box.y1,
         0, 0, 0, 0,
       ],

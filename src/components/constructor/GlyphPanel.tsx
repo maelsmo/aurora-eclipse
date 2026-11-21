@@ -16,6 +16,7 @@ import { glyphAdvance } from "@/engine/compile"
 import { layoutText, makeScene } from "@/engine/scene"
 import { download } from "@/engine/storage"
 import type { GlyphDef, PrimDef } from "@/engine/types"
+import { primPoints } from "@/engine/types"
 import { editingAlphabet, useStore } from "@/state/store"
 import { editTarget, primNames, withPrims } from "./editing"
 
@@ -34,8 +35,8 @@ function validGlyphs(raw: unknown): Record<string, GlyphDef> | null {
     const ok = prims.every(
       (p: PrimDef) =>
         p &&
-        ["stroke", "arc", "dot", "hole", "slot"].includes(p.kind) &&
-        ("c" in p ? Array.isArray(p.c) : Array.isArray(p.a) && Array.isArray(p.b)),
+        ["stroke", "arc", "dot", "hole", "slot", "box", "ellipse", "sector", "poly"].includes(p.kind) &&
+        ("c" in p ? Array.isArray(p.c) : "pts" in p ? Array.isArray(p.pts) : Array.isArray(p.a) && Array.isArray(p.b)),
     )
     if (ok) out[c] = g as GlyphDef
   }
@@ -195,7 +196,7 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
                 <ParamSlider def={sizeDef} value={prim.s ?? 1} onChange={(v) => setPrim({ ...prim, s: v }, "s")} />
               )}
               <p className="font-mono text-xs text-muted-foreground">
-                {"c" in prim ? `центр ${prim.c.join(", ")}` : `${prim.a.join(", ")} → ${prim.b.join(", ")}`}
+                {"c" in prim ? `центр ${prim.c.join(", ")}` : primPoints(prim).map((q) => q.join(", ")).join(" → ")}
               </p>
               <Button
                 variant="outline"

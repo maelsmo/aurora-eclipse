@@ -4,7 +4,7 @@
 // → grain as a post pass (two halves with add / reverse subtract).
 // The world point comes from gl_FragCoord, so rasters, aurora and grain
 // line up across instances.
-import { clusterFragment, haloFragment, instanceVertex, postFragment, postVertex } from "./glsl/programs"
+import { clusterFragment, haloFragment, instanceVertex, postFragment, postVertex, soloFragment } from "./glsl/programs"
 import {
   createPacked,
   packFrame,
@@ -17,6 +17,7 @@ import {
   PRIM_TEX_H,
   PRIM_TEX_W,
   PRIMS_PER_ROW,
+  INSTANCE,
 } from "./pack"
 import { hexToRgb, type Frame } from "../frame"
 import type { Material } from "../scene"
@@ -37,6 +38,7 @@ export class GlyphRenderer {
   readonly canvas: HTMLCanvasElement
   private gl: WebGL2RenderingContext
   private cluster!: Program
+  private solo!: Program
   private halo!: Program
   private post!: Program
   private vao!: WebGLVertexArrayObject
@@ -135,6 +137,10 @@ export class GlyphRenderer {
       ...envUniforms,
       "uAur0", "uAur1", "uAur2", "uAurora", "uDepthColor", "uDepth", "uOverlapColor", "uOverlap",
     ])
+    this.solo = this.program(instanceVertex, soloFragment, [
+      ...envUniforms,
+      "uAur0", "uAur1", "uAur2", "uAurora", "uDepthColor", "uDepth", "uOverlapColor", "uOverlap",
+    ])
     this.halo = this.program(instanceVertex, haloFragment, [
       ...envUniforms,
       "uHaloMode", "uGlowColor", "uGlow", "uShadowColor", "uShadow",
@@ -148,9 +154,9 @@ export class GlyphRenderer {
     gl.bufferData(gl.ARRAY_BUFFER, MAX_INSTANCES * INSTANCE_FLOATS * 4, gl.DYNAMIC_DRAW)
     for (let a = 0; a < 5; a++) {
       gl.enableVertexAttribArray(a)
-      gl.vertexAttribPointer(a, 4, gl.FLOAT, false, INSTANCE_FLOATS * 4, a * 16)
       gl.vertexAttribDivisor(a, 1)
     }
+    this.bindInstances(0)
     // The post pass needs no vertex data, but keep one enabled attribute for old drivers.
     this.postVao = gl.createVertexArray()!
     gl.bindVertexArray(this.postVao)
@@ -165,6 +171,13 @@ export class GlyphRenderer {
     this.layerTex = this.makeTexture(1, LAYER_TEXELS, MAX_LAYERS)
     this.lookTex = this.makeTexture(2, LOOK_TEXELS, MAX_LOOKS)
     this.fresh = true
+  }
+
+  /** Points the instance attributes at instance `first` (WebGL2 has no base instance). */
+  private bindInstances(first: number) {
+    const gl = this.gl
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer)
+    for (let a = 0; a < 5; a++) gl.vertexAttribPointer(a, 4, gl.FLOAT, false, INSTANCE_FLOATS * 4, first * INSTANCE_FLOATS * 4 + a * 16)
   }
 
   /** Resizes the drawing buffer; returns true when it changed. */
@@ -268,19 +281,32 @@ export class GlyphRenderer {
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n)
     }
 
-    // 4. Bodies in z-order.
+    // 4. Bodies in z-order: runs of one instance kind share a program.
     if (n > 0) {
-      this.setEnv(this.cluster, frame, view, 0, [0, 0])
-      const L = this.cluster.loc
-      gl.uniform3fv(L.get("uAur0")!, hexToRgb(m.aurora[0]))
-      gl.uniform3fv(L.get("uAur1")!, hexToRgb(m.aurora[1]))
-      gl.uniform3fv(L.get("uAur2")!, hexToRgb(m.aurora[2]))
-      gl.uniform2f(L.get("uAurora")!, m.auroraScale, m.auroraSpeed)
-      gl.uniform3fv(L.get("uDepthColor")!, hexToRgb(m.depthColor))
-      gl.uniform1f(L.get("uDepth")!, m.depth)
-      gl.uniform3fv(L.get("uOverlapColor")!, hexToRgb(m.overlapColor))
-      gl.uniform1f(L.get("uOverlap")!, m.overlap)
-      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n)
+      for (const pr of [this.cluster, this.solo]) {
+        this.setEnv(pr, frame, view, 0, [0, 0])
+        const L = pr.loc
+        gl.uniform3fv(L.get("uAur0")!, hexToRgb(m.aurora[0]))
+        gl.uniform3fv(L.get("uAur1")!, hexToRgb(m.aurora[1]))
+        gl.uniform3fv(L.get("uAur2")!, hexToRgb(m.aurora[2]))
+        gl.uniform2f(L.get("uAurora")!, m.auroraScale, m.auroraSpeed)
+        gl.uniform3fv(L.get("uDepthColor")!, hexToRgb(m.depthColor))
+        gl.uniform1f(L.get("uDepth")!, m.depth)
+        gl.uniform3fv(L.get("uOverlapColor")!, hexToRgb(m.overlapColor))
+        gl.uniform1f(L.get("uOverlap")!, m.overlap)
+      }
+      const I = p.instances
+      let start = 0
+      while (start < n) {
+        const kind = I[start * INSTANCE_FLOATS + 10]
+        let end = start + 1
+        while (end < n && I[end * INSTANCE_FLOATS + 10] === kind) end++
+        gl.useProgram((kind === INSTANCE.solo ? this.solo : this.cluster).prog)
+        this.bindInstances(start)
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, end - start)
+        start = end
+      }
+      this.bindInstances(0)
     }
 
     // 5. Grain: rgb ± noise × alpha, alpha untouched.
@@ -311,7 +337,7 @@ export class GlyphRenderer {
     gl.deleteBuffer(this.instanceBuffer)
     gl.deleteVertexArray(this.vao)
     gl.deleteVertexArray(this.postVao)
-    for (const p of [this.cluster, this.halo, this.post]) gl.deleteProgram(p.prog)
+    for (const p of [this.cluster, this.solo, this.halo, this.post]) gl.deleteProgram(p.prog)
     // The context is not force-lost: React StrictMode remounts on the same canvas.
   }
 }

@@ -9,6 +9,7 @@ import {
   EyeOff,
   Folder,
   Plus,
+  Shapes,
   Trash2,
   Type,
   Ungroup,
@@ -21,11 +22,13 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { GlyphPicker } from "@/components/shared/GlyphPicker"
 import { GlyphThumb } from "@/components/shared/Thumbs"
 import { ParamSlider } from "@/components/shared/ParamSlider"
 import { opIcons } from "@/components/shared/icons"
-import { nodeLabel } from "@/components/shared/labels"
+import { nodeLabel, shapeNames } from "@/components/shared/labels"
+import { ShapeIcon } from "@/components/shared/ShapeIcon"
 import { opInfo, ops, type Op } from "@/engine/operators"
 import {
   ancestors,
@@ -38,7 +41,10 @@ import {
   layoutText,
   LIMITS,
   makeLayer,
+  makeShape,
   mergeParent,
+  shapeKinds,
+  type ShapeKind,
   moveNode,
   shiftNode,
   ungroup,
@@ -111,6 +117,19 @@ export function LayersPanel() {
     setScene((s) => moveNode({ ...s, layers: [...s.layers, layer] }, layer.id, parent, index))
     select(layer.id)
     setAdding(false)
+  }
+
+  function addShape(kind: ShapeKind) {
+    const { parent, index } = insertionPoint(scene, selected)
+    const sibs = childrenOf(scene.layers, parent)
+    const ref = sibs[Math.max(0, index - 1)]
+    const dims: Record<ShapeKind, [number, number]> = { rect: [4, 4], ellipse: [4, 4], polygon: [4, 4], star: [4, 4], line: [6, 0.5] }
+    const shape = makeShape(
+      { kind, w: dims[kind][0], h: dims[kind][1], sides: kind === "star" ? 5 : 6 },
+      { x: ref ? ref.x + 3 : 0, y: ref?.y ?? 2.5, color: ref?.color ?? inks[1] },
+    )
+    setScene((s) => moveNode({ ...s, layers: [...s.layers, shape] }, shape.id, parent, index))
+    select(shape.id)
   }
 
   function group(mode: "stack" | "merge") {
@@ -208,6 +227,22 @@ export function LayersPanel() {
             </TooltipTrigger>
             <TooltipContent>Разгруппировать</TooltipContent>
           </Tooltip>
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger render={<DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Добавить фигуру" disabled={scene.layers.length >= LIMITS.nodes} />} />}>
+                <Shapes />
+              </TooltipTrigger>
+              <TooltipContent>Фигура</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end">
+              {shapeKinds.map((k) => (
+                <DropdownMenuItem key={k} onClick={() => addShape(k)}>
+                  <ShapeIcon kind={k} />
+                  {shapeNames[k]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Popover open={adding} onOpenChange={setAdding}>
             <PopoverTrigger render={<Button variant="outline" size="sm" disabled={scene.layers.length >= LIMITS.nodes} />}>
               <Plus data-icon="inline-start" />
@@ -268,6 +303,8 @@ export function LayersPanel() {
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-background p-0.5">
                         {l.type === "letter" ? (
                           <GlyphThumb char={l.char} set={l.set} color={l.color} axes={l.axes ? { ...scene.axes, ...l.axes } : undefined} />
+                        ) : l.type === "shape" ? (
+                          <ShapeIcon kind={l.shape.kind} className="size-4" style={{ color: l.color }} />
                         ) : l.type === "group" ? (
                           l.mode === "merge" ? <Combine className="size-4 text-muted-foreground" /> : <Folder className="size-4 text-muted-foreground" />
                         ) : null}

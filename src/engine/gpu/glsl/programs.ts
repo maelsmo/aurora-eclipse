@@ -1,27 +1,31 @@
-// The three instance programs (cluster bodies, halo for corona and shadow)
+// Instance programs (cluster bodies, solo bodies, halo for corona and shadow)
 // and the full-screen post program (background underlay, grain).
 import { data, env, fold, header, noise, sdf, worldPoint } from "./common"
+import { INSTANCE } from "../pack"
 
 /**
  * Instance vertex shader. The quad corners come from gl_VertexID; the local
- * bbox is mapped by the instance matrix, padded by uPad (modules) plus 1.5 px
- * for antialiasing, and shifted by uShift (shadow offset).
+ * bbox is mapped by the instance matrix, padded by uPad (world modules) plus
+ * 1.5 px for antialiasing, and shifted by uShift (shadow offset). The inverse
+ * matrix goes to the fragment stage as flat varyings.
  */
 export const instanceVertex = `${header}
 ${env}
-layout(location = 0) in vec4 iA;     // matrix columns: m00, m10, m01, m11
+layout(location = 0) in vec4 iA;     // matrix columns: m00, m10, m01, m11 (local → world)
 layout(location = 1) in vec4 iB;     // tx, ty, opacity, look
-layout(location = 2) in vec4 iC;     // layer start, layer count, kind, 0
+layout(location = 2) in vec4 iC;     // layer start / glyph record, layer count, kind, scale
 layout(location = 3) in vec4 iD;     // local bbox x0, y0, x1, y1
 layout(location = 4) in vec4 iE;     // colour (solo instances)
 uniform float uPad;
 uniform vec2 uShift;
-flat out ivec4 vRange;
+flat out ivec4 vRange;   // start, count, look, kind
 flat out float vOpacity;
 flat out vec4 vColor;
+flat out vec4 vInv;      // inverse linear part (columns)
+flat out vec3 vT;        // translation, scale
 void main() {
   vec2 corner = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
-  float s = max(length(iA.xy), 1e-6);
+  float s = max(iC.w, 1e-6);
   float pad = (uPad + 1.5 / uView.z) / s;
   vec2 q = mix(iD.xy - pad, iD.zw + pad, corner);
   vec2 w = vec2(iA.x * q.x + iA.z * q.y, iA.y * q.x + iA.w * q.y) + iB.xy + uShift;
@@ -29,17 +33,21 @@ void main() {
   vRange = ivec4(int(iC.x + 0.5), int(iC.y + 0.5), int(iB.w + 0.5), int(iC.z + 0.5));
   vOpacity = iB.z;
   vColor = iE;
+  float det = iA.x * iA.w - iA.z * iA.y;
+  vInv = vec4(iA.w, -iA.y, -iA.z, iA.x) / det;
+  vT = vec3(iB.xy, s);
 }`
 
-/** Bodies of merge clusters: the fold with colour plus the look. */
-export const clusterFragment = `${header}
-#define WANT_COLOR 1
-${env}
-${sdf}
-${data}
-${noise}
-${fold}
-${worldPoint}
+const varyingsIn = `
+flat in ivec4 vRange;
+flat in float vOpacity;
+flat in vec4 vColor;
+flat in vec4 vInv;
+flat in vec3 vT;
+`
+
+/** Look shading shared by bodies: alpha from the field, colour modes. */
+const shading = `
 uniform vec3 uAur0;
 uniform vec3 uAur1;
 uniform vec3 uAur2;
@@ -48,10 +56,6 @@ uniform vec3 uDepthColor;
 uniform float uDepth;
 uniform vec3 uOverlapColor;
 uniform float uOverlap;
-flat in ivec4 vRange;
-flat in float vOpacity;
-flat in vec4 vColor;
-out vec4 outColor;
 
 vec3 aurora(vec2 p) {
   float t = uTime * uAurora.y;
@@ -62,43 +66,101 @@ vec3 aurora(vec2 p) {
   return mix(c, uAur2, smoothstep(0.35, 0.9, n2));
 }
 
-void main() {
-  float px;
-  vec2 world = worldAt(px);
-  Sample s = foldCluster(vRange.x, vRange.y, world, px);
-  float d = s.d;
-  // Derivatives stay in uniform control flow: outside branches and loops.
-  float aa = clamp(fwidth(d), px * 0.5, px * 3.0);
-  vec4 K0 = look(vRange.z, 0), K1 = look(vRange.z, 1);
+// K0: mode, line, spacing, rings | K1: dot, colour mode, inset, _
+float lookAlpha(float d, float aa, float l, float aaL, float cell, vec4 K0) {
   int mode = int(K0.x + 0.5);
-  float cell = max(K1.x, 0.02);
-  vec2 g = world / cell;
-  float l = length((g - floor(g) - 0.5) * cell);
-  float aaL = max(fwidth(l), px * 0.5);
-
-  float a;
-  if (mode == 1) {
-    a = clamp(0.5 - (abs(d) - K0.y * 0.5) / aa, 0.0, 1.0);
-  } else if (mode == 2) {
+  if (mode == 1) return clamp(0.5 - (abs(d) - K0.y * 0.5) / aa, 0.0, 1.0);
+  if (mode == 2) {
     float sp = max(K0.z, 0.02);
     float band = abs(fract(d / sp + 0.5) - 0.5) * sp;
     float ring = clamp(0.5 - (band - K0.y * 0.5) / aa, 0.0, 1.0);
     float reach = K0.w * sp;
-    a = ring * (1.0 - smoothstep(reach - sp * 0.5, reach + sp * 0.5, abs(d)));
-  } else if (mode == 3) {
+    return ring * (1.0 - smoothstep(reach - sp * 0.5, reach + sp * 0.5, abs(d)));
+  }
+  if (mode == 3) {
     float depth = clamp(0.5 - d / (2.5 * cell), 0.0, 1.0);
     float r = cell * 0.58 * sqrt(depth);
-    a = clamp(0.5 - (l - r) / aaL, 0.0, 1.0) * step(0.001, depth);
-  } else {
-    a = clamp(0.5 - d / aa, 0.0, 1.0);
+    return clamp(0.5 - (l - r) / aaL, 0.0, 1.0) * step(0.001, depth);
   }
+  return clamp(0.5 - d / aa, 0.0, 1.0);
+}
 
-  int cm = int(K1.y + 0.5);
-  vec3 col = s.col;
-  if (cm == 1) col = aurora(world);
-  else if (cm == 2) col = mix(s.col, uDepthColor, smoothstep(0.0, max(uDepth, 0.01), -d));
-  if (uOverlap > 0.0) col = mix(col, uOverlapColor, s.ov * uOverlap);
-  a *= vOpacity;
+vec3 lookColor(vec3 base, float d, vec2 world, float cm, float ov) {
+  vec3 col = base;
+  int m = int(cm + 0.5);
+  if (m == 1) col = aurora(world);
+  else if (m == 2) col = mix(base, uDepthColor, smoothstep(0.0, max(uDepth, 0.01), -d));
+  if (uOverlap > 0.0) col = mix(col, uOverlapColor, ov * uOverlap);
+  return col;
+}
+`
+
+/** Bodies of merge clusters: the fold with colour plus the look. */
+export const clusterFragment = `${header}
+#define WANT_COLOR 1
+${env}
+${sdf}
+${data}
+${noise}
+${fold}
+${worldPoint}
+${shading}
+${varyingsIn}
+out vec4 outColor;
+void main() {
+  float px;
+  vec2 world = worldAt(px);
+  vec4 K0 = look(vRange.z, 0), K1 = look(vRange.z, 1);
+  Sample s = foldCluster(vRange.x, vRange.y, world, px, K1.z);
+  float d = s.d;
+  // Derivatives stay in uniform control flow: outside branches and loops.
+  float aa = clamp(fwidth(d), px * 0.5, px * 3.0);
+  float cell = max(K1.x, 0.02);
+  vec2 g = world / cell;
+  float l = length((g - floor(g) - 0.5) * cell);
+  float aaL = max(fwidth(l), px * 0.5);
+  float a = lookAlpha(d, aa, l, aaL, cell, K0) * vOpacity;
+  vec3 col = lookColor(s.col, d, world, K1.y, s.ov);
+  outColor = vec4(col * a, a);
+}`
+
+/**
+ * One letter or shape: the glyph is evaluated in its own coordinates through
+ * the inverse instance matrix; modules drawn as outlines add their contours.
+ */
+export const soloFragment = `${header}
+${env}
+${sdf}
+${data}
+${noise}
+${worldPoint}
+${shading}
+${varyingsIn}
+out vec4 outColor;
+void main() {
+  float px;
+  vec2 world = worldAt(px);
+  vec4 K0 = look(vRange.z, 0), K1 = look(vRange.z, 1);
+  vec2 q = mat2(vInv.xy, vInv.zw) * (warp(world) - vT.xy);
+  int gi = vRange.x;
+  vec4 G0 = lay(gi, 0);
+  vec4 G3 = lay(gi, 3);
+  float sc = vT.z;
+  Parts P = glyphParts(int(G0.x + 0.5), int(G0.y + 0.5), q, G3, lay(gi, 2).w, K1.z, true, px / sc);
+  float d = P.body * sc;
+  float dOut = max(P.outl * sc - K0.y * 0.5, -P.cut * sc);
+  float aa = clamp(fwidth(d), px * 0.5, px * 3.0);
+  float aaO = clamp(fwidth(dOut), px * 0.5, px * 3.0);
+  float cell = max(K1.x, 0.02);
+  vec2 g = world / cell;
+  float l = length((g - floor(g) - 0.5) * cell);
+  float aaL = max(fwidth(l), px * 0.5);
+  float a = lookAlpha(d, aa, l, aaL, cell, K0);
+  // Filled modules without fillet / inset: summed coverage closes seams between tiles.
+  if (int(K0.x + 0.5) == 0 && G3.x < 1e-4 && K1.z <= 0.0)
+    a = max(a, min(1.0, P.cov) * clamp(0.5 + P.cut * sc / px, 0.0, 1.0));
+  a = max(a, clamp(0.5 - dOut / aaO, 0.0, 1.0)) * vOpacity;
+  vec3 col = lookColor(vColor.rgb, d, world, K1.y, 0.0);
   outColor = vec4(col * a, a);
 }`
 
@@ -116,14 +178,21 @@ uniform vec3 uGlowColor;
 uniform vec2 uGlow;      // intensity, size
 uniform vec3 uShadowColor;
 uniform vec2 uShadow;    // opacity, softness
-flat in ivec4 vRange;
-flat in float vOpacity;
-flat in vec4 vColor;
+${varyingsIn}
 out vec4 outColor;
 void main() {
   float px;
-  vec2 world = worldAt(px);
-  float d = foldCluster(vRange.x, vRange.y, world - uShift, px).d;
+  vec2 world = worldAt(px) - uShift;
+  vec4 K0 = look(vRange.z, 0), K1 = look(vRange.z, 1);
+  float d;
+  if (vRange.w == ${INSTANCE.solo}) {
+    vec2 q = mat2(vInv.xy, vInv.zw) * (warp(world) - vT.xy);
+    vec4 G0 = lay(vRange.x, 0);
+    Parts P = glyphParts(int(G0.x + 0.5), int(G0.y + 0.5), q, lay(vRange.x, 3), lay(vRange.x, 2).w, K1.z, true, px / vT.z);
+    d = min(P.body, max(P.outl - K0.y * 0.5 / vT.z, -P.cut)) * vT.z;
+  } else {
+    d = foldCluster(vRange.x, vRange.y, world, px, K1.z).d;
+  }
   float aa = clamp(fwidth(d), px * 0.5, px * 3.0);
   if (uHaloMode == 0) {
     float g = clamp(uGlow.x * exp(-max(d, 0.0) / max(uGlow.y, 0.01)), 0.0, 1.0) * vOpacity;
