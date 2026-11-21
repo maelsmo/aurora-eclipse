@@ -11,6 +11,9 @@ import {
   Undo2,
   CircleDot,
   RectangleHorizontal,
+  Square,
+  SquareRoundCorner,
+  Triangle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
@@ -20,7 +23,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { GlyphThumb } from "@/components/shared/Thumbs"
 import { charset } from "@/engine/alphabet"
-import { useStore } from "@/state/store"
+import { editingAlphabet, useStore } from "@/state/store"
 import { GlyphList } from "./GlyphList"
 import { GlyphEditor } from "./GlyphEditor"
 import { GlyphPanel } from "./GlyphPanel"
@@ -33,14 +36,21 @@ const tools: { value: Tool; label: string; hint: string; Icon: typeof Circle }[]
   { value: "dot", label: "Спутник", hint: "Отдельный диск (D)", Icon: Circle },
   { value: "hole", label: "Зрачок", hint: "Круглый просвет (H)", Icon: CircleDashed },
   { value: "slot", label: "Прорезь", hint: "Вычитаемая капсула (L)", Icon: RectangleHorizontal },
+  { value: "box", label: "Клетка", hint: "Прямоугольник: протяните по сетке (B)", Icon: Square },
+  { value: "quarter", label: "Четверть", hint: "Четверть круга: угол в конце протяжки скругляется (Q)", Icon: SquareRoundCorner },
+  { value: "ellipse", label: "Эллипс", hint: "Эллипс в протянутой рамке (E)", Icon: Circle },
+  { value: "poly", label: "Клин", hint: "Прямоугольный треугольник с прямым углом в начале (T)", Icon: Triangle },
 ]
-const keys: Record<string, Tool> = { v: "select", s: "stroke", a: "arc", d: "dot", h: "hole", l: "slot" }
+const keys: Record<string, Tool> = { v: "select", s: "stroke", a: "arc", d: "dot", h: "hole", l: "slot", b: "box", q: "quarter", e: "ellipse", t: "poly" }
 
 function Specimen({ onOpen }: { onOpen: (c: string) => void }) {
+  const alphabet = useStore(editingAlphabet)
+  const set = useStore((s) => s.editingSet)
+  const chars = [...charset, ...Object.keys(alphabet).filter((c) => !charset.includes(c))]
   return (
     <ScrollArea className="min-h-0 flex-1 rounded-xl border bg-background">
       <div className="grid grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-2 p-4">
-        {[...charset].map((c) => (
+        {chars.map((c) => (
           <button
             key={c}
             type="button"
@@ -48,7 +58,7 @@ function Specimen({ onOpen }: { onOpen: (c: string) => void }) {
             className="flex aspect-[4/5] flex-col items-center gap-1 rounded-lg p-2 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
             aria-label={"Открыть " + c}
           >
-            <GlyphThumb char={c} className="pointer-events-none flex-1" />
+            <GlyphThumb char={c} set={set} className="pointer-events-none flex-1" />
             <span className="text-xs text-muted-foreground">{c}</span>
           </button>
         ))}

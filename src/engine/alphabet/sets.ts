@@ -3,6 +3,7 @@
 import type { Alphabet, GlyphDef } from "../types"
 import type { LookPatch } from "../scene/types"
 import { defaultAlphabet } from "./index"
+import { geoAlphabet, geoLook } from "./geo"
 
 export type SetKind = "strokes" | "shapes"
 export type SetBase = "default" | "geo" | "empty"
@@ -20,7 +21,7 @@ export type GlyphSet = {
 
 const bases: Record<SetBase, () => Alphabet> = {
   default: () => defaultAlphabet,
-  geo: () => defaultAlphabet,
+  geo: () => geoAlphabet,
   empty: () => ({}),
 }
 
@@ -43,6 +44,8 @@ export function setAlphabet(set: GlyphSet): Alphabet {
 }
 
 export const mainSet = (): GlyphSet => ({ id: "main", name: "Основной", kind: "strokes", base: "default", glyphs: {}, updated: Date.now() })
+/** The built-in geometric set, present in every library. */
+export const geoSet = (): GlyphSet => ({ id: "geo", name: "Геометрия", kind: "shapes", base: "geo", glyphs: {}, look: { ...geoLook }, updated: Date.now() })
 
 export type LibraryEntry = { set: GlyphSet; alphabet: Alphabet; version: string }
 
@@ -70,8 +73,10 @@ export function resolveGlyphSet(lib: Library, char: string, own: string | undefi
     const e = id ? lib.sets[id] : undefined
     if (e && char in e.alphabet) return e
   }
+  // Last resort: any set that has the sign (pattern tiles of another set).
+  for (const e of Object.values(lib.sets)) if (char in e.alphabet) return e
   return null
 }
 
 /** A library with only the default alphabet (tests, previews without a store). */
-export const defaultLibrary = (): Library => makeLibrary([mainSet()], 0)
+export const defaultLibrary = (): Library => makeLibrary([mainSet(), geoSet()], 0)

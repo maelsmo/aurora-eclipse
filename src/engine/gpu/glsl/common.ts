@@ -71,13 +71,20 @@ float sdBox(vec2 p, vec4 b) {
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
 }
 
-// r: top-left, top-right, bottom-right, bottom-left
+// r: top-left, top-right, bottom-right, bottom-left, each up to the full side
+// (box ∩ corner discs: radius = side makes a quarter disc cell).
+float cornerCut(vec2 p, vec2 c, vec2 h, float rr, vec2 s) {
+  vec2 u = (p - (c + s * (h - rr))) * s;
+  return (rr > 0.0 && u.x > 0.0 && u.y > 0.0) ? length(u) - rr : -BIG;
+}
 float sdRoundBox4(vec2 p, vec2 c, vec2 h, vec4 r) {
-  vec2 q0 = p - c;
-  float rr = q0.x > 0.0 ? (q0.y > 0.0 ? r.y : r.z) : (q0.y > 0.0 ? r.x : r.w);
-  rr = min(rr, min(h.x, h.y));
-  vec2 q = abs(q0) - h + rr;
-  return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - rr;
+  vec2 q = abs(p - c) - h;
+  float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+  d = max(d, cornerCut(p, c, h, r.x, vec2(-1.0, 1.0)));
+  d = max(d, cornerCut(p, c, h, r.y, vec2(1.0, 1.0)));
+  d = max(d, cornerCut(p, c, h, r.z, vec2(1.0, -1.0)));
+  d = max(d, cornerCut(p, c, h, r.w, vec2(-1.0, -1.0)));
+  return d;
 }
 
 float sdEllipse(vec2 p, vec2 c, vec2 r) {
@@ -108,11 +115,11 @@ float sdSector(vec2 p, vec4 t0, vec4 t1, vec4 t3) {
   return d * min(S.x, S.y);
 }
 
-float sdPolygon4(vec2 p, vec2 a, vec2 b, vec2 c, vec2 e, int n) {
-  vec2 v[4] = vec2[4](a, b, c, e);
+float sdPolygon8(vec2 p, vec4 t3, vec4 t4, vec4 t5, vec4 t6, int n) {
+  vec2 v[8] = vec2[8](t3.xy, t3.zw, t4.xy, t4.zw, t5.xy, t5.zw, t6.xy, t6.zw);
   float d = dot(p - v[0], p - v[0]);
   float s = 1.0;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 8; i++) {
     if (i >= n) break;
     int j = i == 0 ? n - 1 : i - 1;
     vec2 ed = v[j] - v[i], w = p - v[i];
@@ -165,7 +172,7 @@ float geoField(int kind, int i, vec2 p, vec4 t0) {
   if (kind == ${KIND.box}) return sdRoundBox4(p, t0.yz, vec2(t0.w, t1.x), vec4(t1.yzw, prim(i, 2).x));
   if (kind == ${KIND.ellipse}) return sdEllipse(p, t0.yz, vec2(t0.w, t1.x));
   if (kind == ${KIND.sector}) return sdSector(p, t0, t1, prim(i, 3));
-  if (kind == ${KIND.poly}) { vec4 a = prim(i, 3), b = prim(i, 4); return sdPolygon4(p, a.xy, a.zw, b.xy, b.zw, int(t0.y + 0.5)); }
+  if (kind == ${KIND.poly}) return sdPolygon8(p, prim(i, 3), prim(i, 4), prim(i, 5), prim(i, 6), int(t0.y + 0.5));
   return sdNgon(p, t0, t1);
 }
 
@@ -175,16 +182,63 @@ float geoField(int kind, int i, vec2 p, vec4 t0) {
  * and the cut field. With solo = false every module joins the body (the fold
  * of a merge group sees one field). g: fillet, cutK, attract, ink.
  */
-struct Parts { float body; float outl; float cut; float cov; };
+/** Centre of a module's arcs: its roundest corner's circle, or its own centre. */
+vec2 arcCentre(int kind, int i, vec4 t0) {
+  if (kind == ${KIND.box}) {
+    vec4 t1 = prim(i, 1);
+    vec4 r = vec4(t1.yzw, prim(i, 2).x); // tl, tr, br, bl
+    float best = max(max(r.x, r.y), max(r.z, r.w));
+    if (best < 1e-6) return t0.yz;
+    vec2 s = best == r.x ? vec2(-1.0, 1.0) : best == r.y ? vec2(1.0, 1.0) : best == r.z ? vec2(1.0, -1.0) : vec2(-1.0, -1.0);
+    return t0.yz + s * (vec2(t0.w, t1.x) - best);
+  }
+  if (kind == ${KIND.poly}) {
+    vec4 t3 = prim(i, 3), t4 = prim(i, 4), t5 = prim(i, 5), t6 = prim(i, 6);
+    vec2 v[8] = vec2[8](t3.xy, t3.zw, t4.xy, t4.zw, t5.xy, t5.zw, t6.xy, t6.zw);
+    int n = int(t0.y + 0.5);
+    vec2 c = vec2(0.0);
+    for (int k = 0; k < 8; k++) { if (k >= n) break; c += v[k]; }
+    return c / float(n);
+  }
+  return t0.yz;
+}
+
+/** Stripe coordinate (design units): h → y, v → x, arc → radius, contour → depth. */
+float stripeF(int kind, int i, vec2 p, vec4 t0, float dir, float d) {
+  int k = int(dir + 0.5);
+  if (k == 0) return p.y;
+  if (k == 1) return p.x;
+  if (k == 3) return -d;
+  return length(p - arcCentre(kind, i, t0));
+}
 
 /**
- * cov: summed coverage of filled modules (aa = one pixel in design units).
- * Modules that tile share edges where min() reads 0; adding their coverages
- * closes that hairline seam. Only used without fillet and inset.
+ * Coverage of stripes: st = (stripes per module, inked share). Analytic AA;
+ * below 2.5 px per period the stripes fade into their average density.
  */
-Parts glyphParts(int start, int count, vec2 p, vec4 g, float shear, float inset, bool solo, float aaD) {
+float stripeCov(float f, vec2 st, float aaD) {
+  float v = abs(fract(f * st.x) - 0.5);
+  float dist = (v - st.y * 0.5) / st.x;
+  float c = clamp(0.5 - dist / aaD, 0.0, 1.0);
+  return mix(st.y, c, smoothstep(1.5, 2.5, 1.0 / (st.x * aaD)));
+}
+
+/**
+ * Parts of a glyph in design units. R: prim start, prim count, tile start,
+ * tile count. The field primitives give the seamless body; tiles (modules
+ * one by one) give inset gaps and, in solo instances, stripes (lines) and
+ * contours of modules drawn as outlines. In a merge cluster (solo = false)
+ * every module is filled: the fold sees one field.
+ */
+struct Parts { float body; float outl; float cut; float lines; };
+
+Parts glyphParts(ivec4 R, vec2 p, vec4 g, float shear, float inset, int lookMode, bool solo, float aaD, vec3 st) {
   p.x -= (p.y - 2.5) * shear;
-  float body = BIG, cut = BIG, sat = BIG, outl = BIG, cov = 0.0;
+  bool useTiles = inset > 0.0 && R.w > 0;
+  bool linesLook = solo && lookMode == ${4};
+  bool skipMerged = useTiles || (linesLook && R.w > 0);
+  float body = BIG, cut = BIG, sat = BIG, outl = BIG, lines = 0.0;
+  int start = R.x, count = R.y;
   for (int n = 0; n < MAX_GLYPH_PRIMS; n++) {
     if (n >= count) break;
     int i = start + n;
@@ -207,20 +261,33 @@ Parts glyphParts(int start, int count, vec2 p, vec4 g, float shear, float inset,
       vec4 f = prim(i, 2); // _, mode, dir, neg
       float d = geoField(kind, i, p, t0);
       if (f.w > 0.5) cut = min(cut, d);
-      else if (solo && int(f.y + 0.5) == 3) outl = min(outl, abs(d + inset * 0.5));
-      else {
-        body = inset > 0.0 ? min(body, d + inset * 0.5) : smin(body, d, g.x);
-        cov += clamp(0.5 - (d - g.w) / aaD, 0.0, 1.0);
-      }
+      else if (!skipMerged) body = min(body, d);
+    }
+  }
+  if (useTiles || solo) {
+    for (int n = 0; n < MAX_GLYPH_PRIMS; n++) {
+      if (n >= R.w) break;
+      int i = R.z + n;
+      vec4 t0 = prim(i, 0);
+      vec4 f = prim(i, 2);
+      if (f.w > 0.5) continue; // cut-outs already come from the field primitives
+      int kind = int(t0.x + 0.5);
+      int m = int(f.y + 0.5);
+      if (m == 0) m = linesLook ? 2 : 1;
+      if (!solo) m = 1;
+      float d = geoField(kind, i, p, t0) + inset * 0.5;
+      if (m == 1) { if (skipMerged) body = min(body, d); }
+      else if (m == 3) outl = min(outl, abs(d));
+      else lines += clamp(0.5 - d / aaD, 0.0, 1.0) * stripeCov(stripeF(kind, i, p, t0, st.z > 0.5 ? st.z - 1.0 : f.z, d), st.xy, aaD);
     }
   }
   float d = smax(body, -cut, g.y);
   d = g.z > 0.0 ? smin(d, sat, g.z) : min(d, sat);
-  return Parts(d - g.w, outl, cut, cov);
+  return Parts(d - g.w, outl, cut, lines);
 }
 
-float glyphField(int start, int count, vec2 p, vec4 g, float shear, float inset) {
-  return glyphParts(start, count, p, g, shear, inset, false, 1.0).body;
+float glyphField(ivec4 R, vec2 p, vec4 g, float shear, float inset) {
+  return glyphParts(R, p, g, shear, inset, 0, false, 1.0, vec3(1.0, 0.5, 0.0)).body;
 }
 `
 
@@ -274,8 +341,9 @@ float layerField(int i, vec2 w, float inset) {
   lp.x *= L0.w; // mirror
   lp += L2.yz;
   float b = sdBox(lp, L6);
-  if (b > 0.0) return (b + lay(i, 7).x) * L2.x;
-  return glyphField(int(L0.x + 0.5), int(L0.y + 0.5), lp, lay(i, 3), L2.w, inset) * L2.x;
+  if (b > 0.0) return (b + lay(i, 7).x) * L2.x; // outside the early-exit box: a lower bound
+  vec4 L7 = lay(i, 7);
+  return glyphField(ivec4(int(L0.x + 0.5), int(L0.y + 0.5), int(L7.y + 0.5), int(L7.z + 0.5)), lp, lay(i, 3), L2.w, inset) * L2.x;
 }
 
 float front(float acc, float b, float aa) { return clamp(0.5 + 0.5 * (acc - b) / aa, 0.0, 1.0); }

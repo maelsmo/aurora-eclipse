@@ -118,14 +118,29 @@ export function sdArc(
   return mix(flat, capped, round)
 }
 
-/** Rectangle with a radius per corner; r = [top-left, top-right, bottom-right, bottom-left]. */
+const CORNER_SX = [-1, 1, 1, -1],
+  CORNER_SY = [1, 1, -1, -1]
+
+/**
+ * Rectangle with a radius per corner, r = [top-left, top-right, bottom-right,
+ * bottom-left], each up to the full side: a corner of radius = side turns a
+ * square cell into a quarter disc (centred on the opposite corner), two
+ * opposite ones into a leaf. Box ∩ corner discs; exact inside the corner
+ * zones and on the edges.
+ */
 export function sdRoundBox4(px: number, py: number, cx: number, cy: number, hx: number, hy: number, r: readonly number[]) {
-  const qx0 = px - cx,
-    qy0 = py - cy
-  const rr = Math.min(qx0 > 0 ? (qy0 > 0 ? r[1] : r[2]) : qy0 > 0 ? r[0] : r[3], hx, hy)
-  const qx = Math.abs(qx0) - hx + rr,
-    qy = Math.abs(qy0) - hy + rr
-  return Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - rr
+  const qx = Math.abs(px - cx) - hx,
+    qy = Math.abs(py - cy) - hy
+  let d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0)
+  for (let i = 0; i < 4; i++) {
+    const rr = r[i]
+    if (rr <= 0) continue
+    // Corner frame: the corner circle's centre at the origin, the corner in +x +y.
+    const ux = (px - (cx + CORNER_SX[i] * (hx - rr))) * CORNER_SX[i],
+      uy = (py - (cy + CORNER_SY[i] * (hy - rr))) * CORNER_SY[i]
+    if (ux > 0 && uy > 0) d = Math.max(d, Math.hypot(ux, uy) - rr)
+  }
+  return d
 }
 
 /** Ellipse, first-order distance (exact zero set, unit gradient on the edge). */
@@ -251,6 +266,54 @@ export function sdPrim(p: CompiledPrim, x: number, y: number) {
   }
 }
 
+/**
+ * Stripe coordinate of a module in "lines" mode, design units: stripes run
+ * where fract(f · n) is near ½. h → y, v → x, arc → distance to the module's
+ * arc centre (its roundest corner, or its centre), contour → depth inside it.
+ * Stripes live on the glyph grid, so neighbouring modules continue each other.
+ */
+export function stripeCoord(t: CompiledPrim, x: number, y: number, d: number): number {
+  if (!isGeoPrim(t)) return -d
+  switch (t.dir) {
+    case 0:
+      return y
+    case 1:
+      return x
+    case 3:
+      return -d
+    default: {
+      const [cx, cy] = arcCentre(t)
+      return Math.hypot(x - cx, y - cy)
+    }
+  }
+}
+
+/** Centre of the arcs of a module: the centre of its roundest corner, or its own centre. */
+export function arcCentre(t: Extract<CompiledPrim, { neg: boolean }>): [number, number] {
+  if (t.kind === "box") {
+    let k = -1,
+      best = 1e-6
+    t.r.forEach((r, i) => {
+      if (r > best) {
+        best = r
+        k = i
+      }
+    })
+    if (k < 0) return [t.c[0], t.c[1]]
+    // tl, tr, br, bl → the corner circle's centre.
+    const sx = k === 1 || k === 2 ? 1 : -1,
+      sy = k === 0 || k === 1 ? 1 : -1
+    return [t.c[0] + sx * (t.h[0] - best), t.c[1] + sy * (t.h[1] - best)]
+  }
+  if (t.kind === "poly") return [t.pts.reduce((a, p) => a + p[0], 0) / t.pts.length, t.pts.reduce((a, p) => a + p[1], 0) / t.pts.length]
+  return [t.c[0], t.c[1]]
+}
+
+/** Is a design point on a stripe (no antialiasing; tests and the CPU fallback)? */
+export function onStripe(f: number, perModule: number, fill: number) {
+  return Math.abs(f * perModule - Math.floor(f * perModule) - 0.5) < fill / 2
+}
+
 /** Is a compiled primitive a geometric module (box, ellipse, sector, poly, ngon)? */
 export const isGeoPrim = (p: CompiledPrim): p is Extract<CompiledPrim, { neg: boolean }> =>
   p.kind === "box" || p.kind === "ellipse" || p.kind === "sector" || p.kind === "poly" || p.kind === "ngon"
@@ -265,14 +328,24 @@ export function sdGlyph(g: CompiledGlyph, x: number, y: number, inset = 0) {
   let body = BIG,
     cut = BIG,
     sat = BIG
+  // With an inset the modules are taken one by one (gaps open between them);
+  // otherwise the merged field primitives fill without seams.
+  const tiles = inset > 0 && g.tiles
   for (const p of g.prims) {
-    const d = sdPrim(p, x, y)
-    if (p.kind === "stroke" || p.kind === "arc") body = smin(body, d, g.fillet)
-    else if (p.kind === "dot") sat = Math.min(sat, d)
-    else if (p.kind === "hole" || p.kind === "slot") cut = Math.min(cut, d)
-    else if (p.neg) cut = Math.min(cut, d)
-    else body = inset > 0 ? Math.min(body, d + inset * 0.5) : smin(body, d, g.fillet)
+    if (p.kind === "stroke" || p.kind === "arc") body = smin(body, sdPrim(p, x, y), g.fillet)
+    else if (p.kind === "dot") sat = Math.min(sat, sdPrim(p, x, y))
+    else if (p.kind === "hole" || p.kind === "slot") cut = Math.min(cut, sdPrim(p, x, y))
+    else if (p.neg) cut = Math.min(cut, sdPrim(p, x, y))
+    else if (!tiles) body = Math.min(body, sdPrim(p, x, y))
   }
+  if (tiles)
+    for (const t of tiles)
+      if (isGeoPrim(t) && !t.neg && t.mode !== 2 && t.mode !== 3) body = Math.min(body, sdPrim(t, x, y) + inset * 0.5)
+  // Modules a set draws as lines or outlines are left out of the merged field;
+  // the CPU reference (picking, export, fallback) treats them as filled.
+  if (g.tiles)
+    for (const t of g.tiles)
+      if (isGeoPrim(t) && !t.neg && (t.mode === 2 || t.mode === 3)) body = Math.min(body, sdPrim(t, x, y) + inset * 0.5)
   let d = smax(body, -cut, g.cutK)
   d = g.attract > 0 ? smin(d, sat, g.attract) : Math.min(d, sat)
   return d - g.ink

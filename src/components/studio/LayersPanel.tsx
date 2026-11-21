@@ -76,15 +76,20 @@ export function LayersPanel() {
   const [text, setText] = useState("")
   const [op, setOp] = useState<Op>("fuse")
   const [adding, setAdding] = useState(false)
+  const [pickSet, setPickSet] = useState<string | null>(null)
+  const [typeSet, setTypeSet] = useState<string | null>(null)
+  const sets = useStore((s) => s.sets)
+  const textSet = typeSet && library.sets[typeSet] ? typeSet : scene.set
 
   function typeText(e: React.FormEvent) {
     e.preventDefault()
     const value = text.trim()
     if (!value) return
-    const missing = [...new Set([...value.toLocaleUpperCase("ru")].filter((c) => c !== " " && c !== "\n" && !(c in alphabet)))]
+    const entry = library.sets[textSet]
+    const textAlphabet = entry?.alphabet ?? alphabet
+    const missing = [...new Set([...value.toLocaleUpperCase("ru")].filter((c) => c !== " " && c !== "\n" && !(c in textAlphabet)))]
     const color = scene.layers.find((l) => l.type === "letter")?.color ?? inks[0]
-    const version = library.sets[scene.set]?.version ?? 0
-    const letters = layoutText(value, alphabet, scene.axes, scene.tracking, { op, color }, version)
+    const letters = layoutText(value, textAlphabet, scene.axes, scene.tracking, { op, color, ...(textSet !== scene.set ? { set: textSet } : {}) }, entry?.version ?? 0)
     if (!letters.length) {
       toast.error("В сете нет этих знаков.")
       return
@@ -103,7 +108,7 @@ export function LayersPanel() {
     if (missing.length) toast("Пропущены знаки вне сета: " + missing.join(" "))
   }
 
-  function addLetter(c: string) {
+  function addLetter(c: string, set = pickSet ?? scene.set) {
     const { parent, index } = insertionPoint(scene, selected)
     const sibs = childrenOf(scene.layers, parent)
     const ref = sibs[Math.max(0, index - 1)]
@@ -113,6 +118,7 @@ export function LayersPanel() {
       y: ref?.y ?? 0,
       op: inMerge && sibs.length ? "fuse" : "union",
       color: ref?.color ?? inks[0],
+      ...(set !== scene.set ? { set } : {}),
     })
     setScene((s) => moveNode({ ...s, layers: [...s.layers, layer] }, layer.id, parent, index))
     select(layer.id)
@@ -175,6 +181,18 @@ export function LayersPanel() {
             <TooltipContent>Добавить текст новым сплавом</TooltipContent>
           </Tooltip>
         </div>
+        <Select items={sets.map((s) => ({ value: s.id, label: s.name }))} value={textSet} onValueChange={(v) => v && setTypeSet(v)}>
+          <SelectTrigger size="sm" className="w-full" aria-label="Сет для текста">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {sets.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select items={opItems} value={op} onValueChange={(v) => v && setOp(v as Op)}>
           <SelectTrigger size="sm" className="w-full" aria-label="Оператор между буквами">
             <SelectValue />
@@ -249,7 +267,7 @@ export function LayersPanel() {
               Буква
             </PopoverTrigger>
             <PopoverContent className="w-80" align="end">
-              <GlyphPicker onPick={addLetter} />
+              <GlyphPicker set={pickSet ?? scene.set} onSet={setPickSet} onPick={(c) => addLetter(c)} />
             </PopoverContent>
           </Popover>
         </div>

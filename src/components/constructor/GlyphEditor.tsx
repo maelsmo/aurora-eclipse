@@ -5,12 +5,13 @@ import { compileGlyph, glyphAdvance, glyphPrims } from "@/engine/compile"
 import { makeLayer, makeScene } from "@/engine/scene"
 import { CAP, OVERHANG, snap } from "@/engine/grid"
 import type { ArcDef, PrimDef, Vec } from "@/engine/types"
+import { isGeo } from "@/engine/types"
 import { editingAlphabet, useStore } from "@/state/store"
-import { editAxes, editTarget, withPrims, type Tool, movePrim, geoPath } from "./editing"
+import { editAxes, editTarget, withPrims, type Tool, movePrim, geoPath, isGeoTool, geoFromDrag, type GeoTool } from "./editing"
 
 type Handle = "a" | "b" | "c" | "r" | "a0" | "a1" | "body" | "adv"
 type Drag = { index: number; handle: Handle; start: Vec; prim: PrimDef }
-type Draft = { kind: "stroke" | "slot" | "arc"; a: Vec; b: Vec }
+type Draft = { kind: "stroke" | "slot" | "arc" | GeoTool; a: Vec; b: Vec }
 
 const DEG = Math.PI / 180
 const SKEL = "var(--foreground)"
@@ -138,7 +139,7 @@ export function GlyphEditor({
       onSelect(own.length)
       return
     }
-    if (tool === "stroke" || tool === "arc" || tool === "slot") setDraft({ kind: tool, a: n, b: n })
+    if (tool === "stroke" || tool === "arc" || tool === "slot" || isGeoTool(tool)) setDraft({ kind: tool, a: n, b: n })
   }
 
   function onPointerMove(e: React.PointerEvent<SVGSVGElement>) {
@@ -187,7 +188,13 @@ export function GlyphEditor({
   function onPointerUp() {
     if (draft) {
       const { kind, a, b } = draft
-      if (kind === "arc") {
+      if (isGeoTool(kind)) {
+        const p = geoFromDrag(kind, a, b)
+        if (p) {
+          commit([...own, p])
+          onSelect(own.length)
+        }
+      } else if (kind === "arc") {
         const r = Math.max(0.5, snap(Math.hypot(b[0] - a[0], b[1] - a[1]), 0.5))
         commit([...own, { kind: "arc", c: a, r, a0: 0, a1: 180 }])
         onSelect(own.length)
@@ -350,7 +357,12 @@ export function GlyphEditor({
           {basePrims.map((p, i) => skeleton(p, i, true))}
           {own.map((p, i) => skeleton(p, i, false))}
           {draft &&
-            (draft.kind === "arc" ? (
+            (isGeoTool(draft.kind) ? (
+              (() => {
+                const p = geoFromDrag(draft.kind, draft.a, draft.b)
+                return p && isGeo(p) ? <path d={geoPath(p, (x, y) => [X(x), Y(y)], s)} fill={ACCENT} fillOpacity={0.15} stroke={ACCENT} strokeDasharray="4 3" pointerEvents="none" /> : null
+              })()
+            ) : draft.kind === "arc" ? (
               <circle cx={X(draft.a[0])} cy={Y(draft.a[1])} r={Math.max(0.5, snap(Math.hypot(draft.b[0] - draft.a[0], draft.b[1] - draft.a[1]), 0.5)) * s} fill="none" stroke={ACCENT} strokeDasharray="4 3" pointerEvents="none" />
             ) : (
               <line x1={X(draft.a[0])} y1={Y(draft.a[1])} x2={X(draft.b[0])} y2={Y(draft.b[1])} stroke={ACCENT} strokeWidth={s} strokeOpacity={0.35} strokeLinecap="round" pointerEvents="none" />

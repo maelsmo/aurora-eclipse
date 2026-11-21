@@ -14,7 +14,10 @@ export function shapePrim(s: ShapeDef): CompiledPrim {
     hh = s.h / 2
   switch (s.kind) {
     case "rect": {
-      const r = (s.corners ?? [s.r, s.r, s.r, s.r]).map((v) => Math.max(0, Math.min(v, hw, hh))) as [number, number, number, number]
+      // A radius above half the side would bulge past the neighbour corner: for the
+      // uniform radius keep Figma's limit; independent corners may reach the full side.
+      const lim = s.corners ? Math.min(s.w, s.h) : Math.min(hw, hh)
+      const r = (s.corners ?? [s.r, s.r, s.r, s.r]).map((v) => Math.max(0, Math.min(v, lim))) as [number, number, number, number]
       return { kind: "box", c: [0, 0], h: [hw, hh], r, ...flags }
     }
     case "ellipse":

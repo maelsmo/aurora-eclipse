@@ -66,9 +66,11 @@ vec3 aurora(vec2 p) {
   return mix(c, uAur2, smoothstep(0.35, 0.9, n2));
 }
 
-// K0: mode, line, spacing, rings | K1: dot, colour mode, inset, _
-float lookAlpha(float d, float aa, float l, float aaL, float cell, vec4 K0) {
+// K0: mode, line, spacing, rings | K1: dot, colour mode, inset, _ | K2: stripes, stripe fill
+float lookAlpha(float d, float aa, float l, float aaL, float cell, vec4 K0, vec4 K2, float px) {
   int mode = int(K0.x + 0.5);
+  // Lines on a merged form: stripes follow its contour, in world units.
+  if (mode == 4) return clamp(0.5 - d / aa, 0.0, 1.0) * stripeCov(-d, K2.xy, px);
   if (mode == 1) return clamp(0.5 - (abs(d) - K0.y * 0.5) / aa, 0.0, 1.0);
   if (mode == 2) {
     float sp = max(K0.z, 0.02);
@@ -110,7 +112,7 @@ out vec4 outColor;
 void main() {
   float px;
   vec2 world = worldAt(px);
-  vec4 K0 = look(vRange.z, 0), K1 = look(vRange.z, 1);
+  vec4 K0 = look(vRange.z, 0), K1 = look(vRange.z, 1), K2 = look(vRange.z, 2);
   Sample s = foldCluster(vRange.x, vRange.y, world, px, K1.z);
   float d = s.d;
   // Derivatives stay in uniform control flow: outside branches and loops.
@@ -119,7 +121,7 @@ void main() {
   vec2 g = world / cell;
   float l = length((g - floor(g) - 0.5) * cell);
   float aaL = max(fwidth(l), px * 0.5);
-  float a = lookAlpha(d, aa, l, aaL, cell, K0) * vOpacity;
+  float a = lookAlpha(d, aa, l, aaL, cell, K0, K2, px) * vOpacity;
   vec3 col = lookColor(s.col, d, world, K1.y, s.ov);
   outColor = vec4(col * a, a);
 }`
@@ -140,13 +142,14 @@ out vec4 outColor;
 void main() {
   float px;
   vec2 world = worldAt(px);
-  vec4 K0 = look(vRange.z, 0), K1 = look(vRange.z, 1);
+  vec4 K0 = look(vRange.z, 0), K1 = look(vRange.z, 1), K2 = look(vRange.z, 2);
   vec2 q = mat2(vInv.xy, vInv.zw) * (warp(world) - vT.xy);
   int gi = vRange.x;
-  vec4 G0 = lay(gi, 0);
-  vec4 G3 = lay(gi, 3);
+  vec4 G0 = lay(gi, 0), G7 = lay(gi, 7);
   float sc = vT.z;
-  Parts P = glyphParts(int(G0.x + 0.5), int(G0.y + 0.5), q, G3, lay(gi, 2).w, K1.z, true, px / sc);
+  int mode = int(K0.x + 0.5);
+  ivec4 R = ivec4(int(G0.x + 0.5), int(G0.y + 0.5), int(G7.y + 0.5), int(G7.z + 0.5));
+  Parts P = glyphParts(R, q, lay(gi, 3), lay(gi, 2).w, K1.z, mode, true, px / sc, K2.xyz);
   float d = P.body * sc;
   float dOut = max(P.outl * sc - K0.y * 0.5, -P.cut * sc);
   float aa = clamp(fwidth(d), px * 0.5, px * 3.0);
@@ -155,10 +158,12 @@ void main() {
   vec2 g = world / cell;
   float l = length((g - floor(g) - 0.5) * cell);
   float aaL = max(fwidth(l), px * 0.5);
-  float a = lookAlpha(d, aa, l, aaL, cell, K0);
-  // Filled modules without fillet / inset: summed coverage closes seams between tiles.
-  if (int(K0.x + 0.5) == 0 && G3.x < 1e-4 && K1.z <= 0.0)
-    a = max(a, min(1.0, P.cov) * clamp(0.5 + P.cut * sc / px, 0.0, 1.0));
+  float a;
+  // Lines: stroke bodies get inner contour stripes (design units), modules their own stripes.
+  if (mode == 4) a = clamp(0.5 - d / aa, 0.0, 1.0) * stripeCov(-P.body, K2.xy, px / sc);
+  else a = lookAlpha(d, aa, l, aaL, cell, K0, K2, px);
+  float cutCov = clamp(0.5 + P.cut * sc / px, 0.0, 1.0);
+  a = max(a, min(1.0, P.lines) * cutCov);
   a = max(a, clamp(0.5 - dOut / aaO, 0.0, 1.0)) * vOpacity;
   vec3 col = lookColor(vColor.rgb, d, world, K1.y, 0.0);
   outColor = vec4(col * a, a);
@@ -187,9 +192,11 @@ void main() {
   float d;
   if (vRange.w == ${INSTANCE.solo}) {
     vec2 q = mat2(vInv.xy, vInv.zw) * (warp(world) - vT.xy);
-    vec4 G0 = lay(vRange.x, 0);
-    Parts P = glyphParts(int(G0.x + 0.5), int(G0.y + 0.5), q, lay(vRange.x, 3), lay(vRange.x, 2).w, K1.z, true, px / vT.z);
-    d = min(P.body, max(P.outl - K0.y * 0.5 / vT.z, -P.cut)) * vT.z;
+    vec4 G0 = lay(vRange.x, 0), G7 = lay(vRange.x, 7);
+    ivec4 R = ivec4(int(G0.x + 0.5), int(G0.y + 0.5), int(G7.y + 0.5), int(G7.z + 0.5));
+    // The halo of a solo object surrounds its filled shape (stripes and contours included).
+    Parts P = glyphParts(R, q, lay(vRange.x, 3), lay(vRange.x, 2).w, K1.z, 0, false, px / vT.z, vec3(1.0, 0.5, 0.0));
+    d = P.body * vT.z;
   } else {
     d = foldCluster(vRange.x, vRange.y, world, px, K1.z).d;
   }

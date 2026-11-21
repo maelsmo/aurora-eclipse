@@ -1,7 +1,7 @@
 // Loading of stored data. v3 keys win; without them the v2 keys are read once
 // and migrated (they are never written, so the v2 app keeps its data).
 import { KEYS, KEYS_V2, readJSON } from "@/engine/storage"
-import { mainSet, type GlyphSet, type SetBase, type SetKind } from "@/engine/alphabet/sets"
+import { geoSet, mainSet, type GlyphSet, type SetBase, type SetKind } from "@/engine/alphabet/sets"
 import { sanitizeLookPatch, sanitizeScene, type Scene } from "@/engine/scene"
 import type { GlyphDef } from "@/engine/types"
 
@@ -35,7 +35,7 @@ export function sanitizeSet(raw: unknown): GlyphSet | null {
 }
 
 /** Built-in sets every library starts with (the geometric set registers itself here). */
-export const builtInSets: (() => GlyphSet)[] = [mainSet]
+export const builtInSets: (() => GlyphSet)[] = [mainSet, geoSet]
 
 function withBuiltIns(sets: GlyphSet[]): GlyphSet[] {
   const out = [...sets]

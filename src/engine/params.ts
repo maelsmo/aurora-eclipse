@@ -63,7 +63,7 @@ export const lookParams: Record<LookNumKey, ParamDef> = {
   spacing: { label: "Шаг колец", min: 0.08, max: 1.5, step: 0.01, unit: "m" },
   rings: { label: "Число колец", min: 1, max: 30, step: 1 },
   dot: { label: "Шаг растра", min: 0.08, max: 1, step: 0.01, unit: "m" },
-  stripes: { label: "Полос на модуль", min: 1, max: 8, step: 0.5, hint: "Частота полос в модулях буквы" },
+  stripes: { label: "Полос на модуль", min: 0.4, max: 8, step: 0.1, hint: "Частота полос: 1,6 — четыре линии на клетку геометрического сета" },
   stripeFill: { label: "Заполнение полос", min: 0.1, max: 0.9, step: 0.01, hint: "Доля полосы в её шаге" },
   inset: { label: "Зазор модулей", min: 0, max: 0.4, step: 0.01, unit: "m", hint: "Просвет между фигурами геометрической буквы" },
 }

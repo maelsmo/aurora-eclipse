@@ -55,7 +55,7 @@ export type BoxDef = GeoBase & { kind: "box"; a: Vec; b: Vec; r?: [number, numbe
 export type EllipseDef = GeoBase & { kind: "ellipse"; c: Vec; rx: number; ry: number }
 /** Disc sector or ring sector from a0 to a1 (degrees CCW); r0 > 0 makes a ring. */
 export type SectorDef = GeoBase & { kind: "sector"; c: Vec; r: number; r0?: number; a0: number; a1: number }
-/** Convex polygon of 3–4 points (triangles, wedges, parallelograms). */
+/** Simple polygon of 3–8 points (triangles, wedges, diagonal letters). */
 export type PolyDef = GeoBase & { kind: "poly"; pts: Vec[] }
 
 export type GeoDef = BoxDef | EllipseDef | SectorDef | PolyDef
@@ -146,4 +146,10 @@ export type CompiledGlyph = {
   shear: number
   /** Rotation / scale centre; defaults to (box centre x, cap middle). Shapes use their own centre. */
   anchor?: Vec
+  /**
+   * Geometric modules one by one (stripes, per-module modes, inset gaps).
+   * In `prims` the filled ones are merged where they share whole edges, so
+   * tiles fill without seams.
+   */
+  tiles?: CompiledPrim[]
 }

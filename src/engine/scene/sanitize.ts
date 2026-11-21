@@ -63,12 +63,12 @@ const R = {
   opacity: [0, 1],
 } as const
 
-const lookRanges: Record<Exclude<keyof Look, "mode" | "colorMode" | "tint">, [number, number]> = {
+const lookRanges: Record<Exclude<keyof Look, "mode" | "colorMode" | "tint" | "lineDir">, [number, number]> = {
   line: [0.005, 2],
   spacing: [0.02, 3],
   rings: [1, 40],
   dot: [0.02, 2],
-  stripes: [0.5, 12],
+  stripes: [0.2, 12],
   stripeFill: [0.05, 0.95],
   inset: [0, 0.5],
 }
@@ -85,6 +85,7 @@ export function sanitizeLookPatch(raw: unknown): LookPatch {
   if (raw.mode !== undefined) out.mode = oneOf(raw.mode, lookModes, "fill")
   if (raw.colorMode !== undefined) out.colorMode = oneOf(raw.colorMode, colorModes, "layer")
   if (isColor(raw.tint)) out.tint = raw.tint
+  if (raw.lineDir === "h" || raw.lineDir === "v" || raw.lineDir === "arc" || raw.lineDir === "contour") out.lineDir = raw.lineDir
   for (const [k, [min, max]] of Object.entries(lookRanges))
     if (isNum(raw[k])) (out as Record<string, number>)[k] = Math.min(max, Math.max(min, raw[k] as number))
   return out

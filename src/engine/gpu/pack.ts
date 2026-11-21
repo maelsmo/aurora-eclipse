@@ -64,12 +64,12 @@ export function createPacked(): Packed {
   }
 }
 
-function writeGlyph(P: Float32Array, g: CompiledGlyph, start: number, count: number) {
+function writeGlyph(P: Float32Array, prims: CompiledGlyph["prims"], start: number, count: number) {
   for (let n = 0; n < count; n++) {
     const i = start + n
     const o = ((i >> 7) * PRIM_TEX_W + (i & 127) * PRIM_TEXELS) * 4
     P.fill(0, o, o + PRIM_TEXELS * 4)
-    const p = g.prims[n]
+    const p = prims[n]
     switch (p.kind) {
       case "stroke":
         P.set([KIND.stroke, p.a[0], p.a[1], p.r, p.b[0], p.b[1], p.round, 0], o)
@@ -124,9 +124,10 @@ function writeGlyph(P: Float32Array, g: CompiledGlyph, start: number, count: num
         break
       }
       case "poly": {
-        const q = [...p.pts]
-        while (q.length < 4) q.push(q[q.length - 1])
-        P.set([KIND.poly, p.pts.length, 0, 0, 0, 0, 0, 0, 0, p.mode, p.dir, p.neg ? 1 : 0, q[0][0], q[0][1], q[1][0], q[1][1], q[2][0], q[2][1], q[3][0], q[3][1]], o)
+        // Up to 8 points in texels 3–6.
+        const n = Math.min(8, p.pts.length)
+        P.set([KIND.poly, n, 0, 0, 0, 0, 0, 0, 0, p.mode, p.dir, p.neg ? 1 : 0], o)
+        for (let k = 0; k < n; k++) P.set(p.pts[k], o + 12 + k * 2)
         break
       }
       case "ngon": {
@@ -140,7 +141,8 @@ function writeGlyph(P: Float32Array, g: CompiledGlyph, start: number, count: num
   }
 }
 
-const lookKey = (l: FrameLook) => `${l.mode}|${l.line}|${l.spacing}|${l.rings}|${l.dot}|${l.stripes}|${l.stripeFill}|${l.inset}|${l.colorMode}`
+const LINE_DIR = { h: 1, v: 2, arc: 3, contour: 4 } as const
+const lookKey = (l: FrameLook) => `${l.mode}|${l.line}|${l.spacing}|${l.rings}|${l.dot}|${l.stripes}|${l.stripeFill}|${l.inset}|${l.colorMode}|${l.lineDir ?? ""}`
 
 /** How far the drawing of a look reaches beyond the shape, modules. */
 export function lookReach(l: FrameLook) {
@@ -176,20 +178,27 @@ export function itemBox(f: Frame, item: FrameItem): Box {
 export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
   const { prims: P, layers: L, looks: K, instances: I } = out
   // Primitive ranges by glyph reference: identical glyphs are stored once.
-  const ranges = new Map<CompiledGlyph, [number, number]>()
+  // [prim start, prim count, tile start, tile count]: tiles follow the field primitives.
+  const ranges = new Map<CompiledGlyph, [number, number, number, number]>()
   const glyphs: CompiledGlyph[] = []
   let pi = 0
   for (const item of frame.items)
     for (const l of item.layers) {
       if (ranges.has(l.glyph)) continue
       const count = Math.min(l.glyph.prims.length, MAX_GLYPH_PRIMS, MAX_PRIMS - pi)
-      ranges.set(l.glyph, [pi, count])
+      const tiles = Math.min(l.glyph.tiles?.length ?? 0, MAX_GLYPH_PRIMS, MAX_PRIMS - pi - count)
+      ranges.set(l.glyph, [pi, count, pi + count, tiles])
       glyphs.push(l.glyph)
-      pi += count
+      pi += count + tiles
     }
   const same = glyphs.length === out.glyphs.length && glyphs.every((g, i) => g === out.glyphs[i])
   out.primsDirty = !same
-  if (!same) for (const g of glyphs) writeGlyph(P, g, ranges.get(g)![0], ranges.get(g)![1])
+  if (!same)
+    for (const g of glyphs) {
+      const [ps, pc, ts, tc] = ranges.get(g)!
+      writeGlyph(P, g.prims, ps, pc)
+      if (tc) writeGlyph(P, g.tiles!, ts, tc)
+    }
   out.glyphs = glyphs
   out.primCount = pi
 
@@ -200,7 +209,7 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
     ki = 0,
     ii = 0
   const writeLayer = (layer: FrameItem["layers"][number], row: number) => {
-    const [ps, pc] = ranges.get(layer.glyph)!
+    const [ps, pc, ts, tc] = ranges.get(layer.glyph)!
     const g = layer.glyph
     L.set(
       [
@@ -211,7 +220,7 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
         layer.k, layer.gap, layer.t, 0,
         layer.color[0], layer.color[1], layer.color[2], 0,
         layer.box.x0, layer.box.y0, layer.box.x1, layer.box.y1,
-        layer.reach, 0, 0, 0,
+        layer.reach, ts, tc, 0,
       ],
       row * LAYER_TEXELS * 4,
     )
@@ -227,7 +236,7 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
       const o = look * LOOK_TEXELS * 4
       const lk = item.look
       K.fill(0, o, o + LOOK_TEXELS * 4)
-      K.set([FILL[lk.mode], lk.line, lk.spacing, lk.rings, lk.dot, COLOR_MODE[lk.colorMode], lk.inset, 0, lk.stripes, lk.stripeFill, 0, 0], o)
+      K.set([FILL[lk.mode], lk.line, lk.spacing, lk.rings, lk.dot, COLOR_MODE[lk.colorMode], lk.inset, 0, lk.stripes, lk.stripeFill, lk.lineDir ? LINE_DIR[lk.lineDir] : 0, 0], o)
     }
     if (item.kind === "solo") {
       const l = item.layers[0]

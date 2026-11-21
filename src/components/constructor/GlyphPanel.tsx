@@ -19,6 +19,9 @@ import type { GlyphDef, PrimDef } from "@/engine/types"
 import { primPoints } from "@/engine/types"
 import { editingAlphabet, useStore } from "@/state/store"
 import { editTarget, primNames, withPrims } from "./editing"
+import { GeoModuleControls, ModuleActions } from "./GeoModuleControls"
+import { NewSetMenu, SetLookSection } from "./SetControls"
+import { isGeo } from "@/engine/types"
 
 const sizeDef = { label: "Размер", min: 0.5, max: 2, step: 0.05 }
 const radiusDef = { label: "Радиус", min: 0.5, max: 4, step: 0.5, unit: "m" }
@@ -29,7 +32,7 @@ function validGlyphs(raw: unknown): Record<string, GlyphDef> | null {
   if (!raw || typeof raw !== "object") return null
   const out: Record<string, GlyphDef> = {}
   for (const [c, g] of Object.entries(raw as Record<string, unknown>)) {
-    if (!(c in defaultAlphabet) || !g || typeof g !== "object") continue
+    if ([...c].length !== 1 || !g || typeof g !== "object") continue
     const prims = (g as GlyphDef).prims
     if (!Array.isArray(prims)) continue
     const ok = prims.every(
@@ -81,7 +84,7 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
 
   function exportVersion() {
     const blob = new Blob(
-      [JSON.stringify({ format: "aurora-eclipse/alphabet", version: 2, name: version.name, glyphs: version.glyphs }, null, 2)],
+      [JSON.stringify({ format: "aurora-eclipse/alphabet", version: 3, name: version.name, kind: version.kind, base: version.base, look: version.look, glyphs: version.glyphs }, null, 2)],
       { type: "application/json" },
     )
     download(blob, `aurora-eclipse_alphabet_${version.name}.json`)
@@ -92,7 +95,11 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
       const data = JSON.parse(await file.text())
       const glyphs = validGlyphs(data?.glyphs)
       if (!glyphs) throw new Error()
-      st.addSet(typeof data.name === "string" ? data.name.slice(0, 40) : file.name, { glyphs })
+      st.addSet(typeof data.name === "string" ? data.name.slice(0, 40) : file.name, {
+        glyphs,
+        base: data.base === "geo" || data.base === "empty" ? data.base : "default",
+        kind: data.kind === "shapes" ? "shapes" : "strokes",
+      })
       toast.success(`Алфавит «${data.name ?? file.name}» загружен: ${Object.keys(glyphs).length} изменённых знаков`)
     } catch {
       toast.error("Файл не похож на алфавит Aurora Eclipse. Нужен JSON, выгруженный из конструктора.")
@@ -195,6 +202,16 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
               {(prim.kind === "dot" || prim.kind === "hole" || prim.kind === "slot") && (
                 <ParamSlider def={sizeDef} value={prim.s ?? 1} onChange={(v) => setPrim({ ...prim, s: v }, "s")} />
               )}
+              {isGeo(prim) && <GeoModuleControls prim={prim} onChange={(p, key) => setPrim(p, key)} />}
+              <ModuleActions
+                prim={prim}
+                centre={[glyphAdvance(target, alphabet) / 2, 2.5]}
+                onReplace={(p) => setPrim(p, "op")}
+                onDuplicate={(p) => {
+                  st.setGlyph(target, withPrims(def, [...own, p]))
+                  onSelect(own.length)
+                }}
+              />
               <p className="font-mono text-xs text-muted-foreground">
                 {"c" in prim ? `центр ${prim.c.join(", ")}` : primPoints(prim).map((q) => q.join(", ")).join(" → ")}
               </p>
@@ -219,23 +236,26 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
           </div>
         </Section>
 
-        <Section title="Версия алфавита">
+        <SetLookSection />
+
+        <Section title="Сет">
           <Select
             items={versions.map((v) => ({ value: v.id, label: v.name }))}
             value={alphabetId}
             onValueChange={(v) => v && st.setEditingSet(v)}
           >
-            <SelectTrigger className="w-full" aria-label="Версия алфавита">
+            <SelectTrigger className="w-full" aria-label="Сет">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {versions.map((v) => (
                 <SelectItem key={v.id} value={v.id}>
-                  {v.name} · {Object.keys(v.glyphs).length}
+                  {v.name} · {v.kind === "shapes" ? "фигуры" : "штрихи"}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          <NewSetMenu />
           <div className="grid grid-cols-2 gap-2">
             <Button variant="outline" size="sm" onClick={() => st.addSet(version.name + " — копия", { from: version.id })}>
               <Copy data-icon="inline-start" />
@@ -262,7 +282,7 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
             </Button>
             <Button variant="outline" size="sm" className="col-span-2" disabled={versions.length < 2} onClick={() => setConfirmDelete(true)}>
               <Trash2 data-icon="inline-start" />
-              Удалить версию
+              Удалить сет
             </Button>
           </div>
           <input
@@ -276,7 +296,7 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
               e.target.value = ""
             }}
           />
-          <Hint>Версия хранит только изменённые знаки. Остальные берутся из базового алфавита.</Hint>
+          <Hint>Сет хранит только изменённые знаки, остальные берёт из своей основы. Буквы сцены могут быть из разных сетов.</Hint>
         </Section>
       </ScrollArea>
 
@@ -292,10 +312,10 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
             }}
           >
             <DialogHeader>
-              <DialogTitle>Название версии</DialogTitle>
-              <DialogDescription>Видно в списке версий и в выгруженном JSON.</DialogDescription>
+              <DialogTitle>Название сета</DialogTitle>
+              <DialogDescription>Видно в списках сетов и в выгруженном JSON.</DialogDescription>
             </DialogHeader>
-            <Input autoFocus value={name} maxLength={40} onChange={(e) => setName(e.target.value)} aria-label="Название версии" />
+            <Input autoFocus value={name} maxLength={40} onChange={(e) => setName(e.target.value)} aria-label="Название сета" />
             <DialogFooter>
               <Button type="submit" disabled={!name.trim()}>
                 Сохранить
@@ -308,9 +328,9 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Удалить версию «{version.name}»?</DialogTitle>
+            <DialogTitle>Удалить сет «{version.name}»?</DialogTitle>
             <DialogDescription>
-              Изменённые в ней знаки ({Object.keys(version.glyphs).length}) пропадут. Перед удалением можно выгрузить JSON.
+              Изменённые в нём знаки ({Object.keys(version.glyphs).length}) пропадут, буквы сцен с этим сетом возьмут знаки из сета сцены. Перед удалением можно выгрузить JSON.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

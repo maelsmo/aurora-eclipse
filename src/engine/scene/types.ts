@@ -47,6 +47,8 @@ export type Look = {
   colorMode: ColorMode
   /** Overrides the colour of every leaf below (a group colour). */
   tint?: string
+  /** "lines": one stripe direction for every module (contours give double outlines). */
+  lineDir?: "h" | "v" | "arc" | "contour"
 }
 export type LookPatch = Partial<Look>
 export type LookKey = keyof Look
@@ -57,7 +59,7 @@ export const defaultLook: Look = {
   spacing: 0.35,
   rings: 6,
   dot: 0.28,
-  stripes: 3,
+  stripes: 4,
   stripeFill: 0.5,
   inset: 0,
   colorMode: "layer",

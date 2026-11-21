@@ -261,8 +261,10 @@ export function compilePrims(prims: PrimDef[], axes: Axes): CompiledGlyph {
           b = map(p.b)
         const hx = Math.abs(b[0] - a[0]) / 2,
           hy = Math.abs(b[1] - a[1]) / 2
-        const k = Math.min(kx, ky)
-        const r = (p.r ?? [0, 0, 0, 0]).map((v) => Math.max(0, Math.min(v * k, hx, hy))) as [number, number, number, number]
+        // Positive modules follow the terminal axis: 1 round tiles, 0 square tiles.
+        const k = Math.min(kx, ky) * (p.neg ? 1 : Math.max(0, Math.min(1, axes.terminal)))
+        // Radii go up to the full side (a quarter disc cell).
+        const r = (p.r ?? [0, 0, 0, 0]).map((v) => Math.max(0, Math.min(v * k, 2 * hx, 2 * hy))) as [number, number, number, number]
         out.push({ kind: "box", c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], h: [hx, hy], r, ...geoFlags(p) })
         if (!p.neg) {
           grow(box, Math.min(a[0], b[0]), Math.min(a[1], b[1]), 0)
@@ -293,7 +295,7 @@ export function compilePrims(prims: PrimDef[], axes: Axes): CompiledGlyph {
         break
       }
       case "poly": {
-        const pts = p.pts.slice(0, 4).map(map)
+        const pts = p.pts.slice(0, 8).map(map)
         if (pts.length < 3) break
         out.push({ kind: "poly", pts, ...geoFlags(p) })
         if (!p.neg) for (const q of pts) grow(box, q[0], q[1], 0)
@@ -311,8 +313,10 @@ export function compilePrims(prims: PrimDef[], axes: Axes): CompiledGlyph {
     box.x0 += Math.min(dx0, dx1)
     box.x1 += Math.max(dx0, dx1)
   }
+  const geo = out.filter(isGeoPrim)
   return {
-    prims: out,
+    prims: geo.length ? [...out.filter((p) => !isGeoPrim(p)), ...mergeTiles(geo)] : out,
+    ...(geo.length ? { tiles: geo } : {}),
     box,
     fillet: Math.max(0, axes.fillet),
     cutK: Math.max(0, axes.fillet) * 0.5,
@@ -320,6 +324,69 @@ export function compilePrims(prims: PrimDef[], axes: Axes): CompiledGlyph {
     ink: axes.ink,
     shear,
   }
+}
+
+type Geo = Extract<CompiledPrim, { neg: boolean }>
+type CBox = Extract<CompiledPrim, { kind: "box" }>
+const isGeoPrim = (p: CompiledPrim): p is Geo =>
+  p.kind === "box" || p.kind === "ellipse" || p.kind === "sector" || p.kind === "poly" || p.kind === "ngon"
+const near = (a: number, b: number) => Math.abs(a - b) < 1e-6
+
+/** Two boxes sharing a whole edge with square corners on it merge into one box. */
+function mergePair(a: CBox, b: CBox): CBox | null {
+  const [ax0, ay0, ax1, ay1] = [a.c[0] - a.h[0], a.c[1] - a.h[1], a.c[0] + a.h[0], a.c[1] + a.h[1]]
+  const [bx0, by0, bx1, by1] = [b.c[0] - b.h[0], b.c[1] - b.h[1], b.c[0] + b.h[0], b.c[1] + b.h[1]]
+  const make = (x0: number, y0: number, x1: number, y1: number, r: [number, number, number, number]): CBox => ({
+    kind: "box",
+    c: [(x0 + x1) / 2, (y0 + y1) / 2],
+    h: [(x1 - x0) / 2, (y1 - y0) / 2],
+    r,
+    mode: 0,
+    dir: 0,
+    neg: false,
+  })
+  // r: tl, tr, br, bl
+  if (near(ay0, by0) && near(ay1, by1)) {
+    if (near(ax1, bx0) && a.r[1] === 0 && a.r[2] === 0 && b.r[0] === 0 && b.r[3] === 0) return make(ax0, ay0, bx1, ay1, [a.r[0], b.r[1], b.r[2], a.r[3]])
+    if (near(bx1, ax0)) return mergePair(b, a)
+  }
+  if (near(ax0, bx0) && near(ax1, bx1)) {
+    if (near(ay1, by0) && a.r[0] === 0 && a.r[1] === 0 && b.r[2] === 0 && b.r[3] === 0) return make(ax0, ay0, ax1, by1, [b.r[0], b.r[1], a.r[2], a.r[3]])
+    if (near(by1, ay0)) return mergePair(b, a)
+  }
+  return null
+}
+
+/**
+ * Field primitives of geometric modules: filled boxes that share whole edges
+ * merge (min() of touching tiles reads 0 along their seam, a merged box does
+ * not); cut-outs and other modules stay as they are. Modules drawn as lines
+ * or outlines by their set stay out of the filled field.
+ */
+export function mergeTiles(tiles: Geo[]): Geo[] {
+  const boxes: CBox[] = []
+  const rest: Geo[] = []
+  for (const t of tiles) {
+    if (t.mode === 2 || t.mode === 3) continue
+    if (t.kind === "box" && !t.neg) boxes.push({ ...t, mode: 0, dir: 0 })
+    else rest.push(t)
+  }
+  let merged = true
+  while (merged) {
+    merged = false
+    for (let i = 0; i < boxes.length && !merged; i++)
+      for (let j = i + 1; j < boxes.length; j++) {
+        const m = mergePair(boxes[i], boxes[j])
+        if (m) {
+          boxes.splice(j, 1)
+          boxes[i] = m
+          merged = true
+          break
+        }
+      }
+  }
+  // Cut-outs last, so the order matches the glyph rules (body, then cuts).
+  return [...boxes, ...rest.filter((t) => !t.neg), ...rest.filter((t) => t.neg)]
 }
 
 /** LRU cache of compiled glyphs; clones with quantised axes stay well inside it. */

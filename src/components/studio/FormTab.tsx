@@ -19,6 +19,7 @@ const transformKeys: LayerNumKey[] = ["x", "y", "scale", "rotation"]
 
 export function FormTab() {
   const axes = useStore((s) => s.scene.axes)
+  const scene = useStore((s) => s.scene)
   const layer = useStore(selectedLayer)
   const { setScene, updateLayer } = useStore.getState()
   const [picking, setPicking] = useState(false)
@@ -43,7 +44,8 @@ export function FormTab() {
               <PopoverContent className="w-80" align="start">
                 <GlyphPicker
                   value={letter.char}
-                  set={letter.set}
+                  set={letter.set ?? scene.set}
+                  onSet={(id) => updateLayer(letter.id, { set: id === scene.set ? undefined : id })}
                   onPick={(c) => {
                     updateLayer(layer.id, { char: c })
                     setPicking(false)

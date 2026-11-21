@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils"
 const fills: { value: LookMode; label: string }[] = [
   { value: "fill", label: "Заливка" },
   { value: "outline", label: "Контур" },
+  { value: "lines", label: "Линии" },
   { value: "isolines", label: "Изолинии" },
   { value: "halftone", label: "Полутон" },
 ]
@@ -86,6 +87,22 @@ export function MaterialTab() {
           ))}
         </ToggleGroup>
         {fillParams[look.mode].map(lookSlider)}
+        {look.mode === "lines" && (
+          <ToggleGroup
+            variant="outline"
+            size="sm"
+            spacing={0}
+            value={[look.lineDir ?? "auto"]}
+            onValueChange={(v) => v[0] && setL({ lineDir: v[0] === "auto" ? undefined : (v[0] as Look["lineDir"]) })}
+            className="w-full"
+            aria-label="Направление линий"
+          >
+            <ToggleGroupItem value="auto" className="flex-1">По модулям</ToggleGroupItem>
+            <ToggleGroupItem value="contour" className="flex-1">Контуры</ToggleGroupItem>
+            <ToggleGroupItem value="h" className="flex-1">Гориз.</ToggleGroupItem>
+            <ToggleGroupItem value="v" className="flex-1">Верт.</ToggleGroupItem>
+          </ToggleGroup>
+        )}
       </Section>
 
       <Section title="Цвет">
