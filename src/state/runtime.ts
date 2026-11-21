@@ -1,6 +1,6 @@
 // Live, non-React state: time, pointer, microphone, motion physics and the
 // effective (modulated) scene of the current frame.
-import { applyMotion, applyRoutes, type MotionState } from "@/engine/modulation"
+import { applyMotion, applyRoutes, type MotionState, type RouteState } from "@/engine/modulation"
 import { emptySignals, lfoValue, MicInput, type Signals } from "@/engine/signals"
 import { nearestDistance, type Frame } from "@/engine/frame"
 import type { Scene } from "@/engine/scene"
@@ -16,6 +16,7 @@ class Runtime {
   private lastPointer: [number, number] | null = null
   mic = new MicInput()
   motion: MotionState = new Map()
+  routes: RouteState = new Map()
   signals: Signals = emptySignals()
   effective: Scene | null = null
   /** Frame of the last draw (picking uses it so clicks hit what is visible). */
@@ -44,6 +45,8 @@ class Runtime {
     const s = this.signals
     s.lfo1 = lfoValue(scene.lfo[0], this.time, 1)
     s.lfo2 = lfoValue(scene.lfo[1], this.time, 2)
+    s.lfo3 = lfoValue(scene.lfo[2], this.time, 3)
+    s.lfo4 = lfoValue(scene.lfo[3], this.time, 4)
     const p = pointerOn ? this.pointerWorld : null
     s.pointerX = p ? this.pointerNorm[0] : s.pointerX * Math.exp(-dt * 3)
     s.pointerY = p ? this.pointerNorm[1] : s.pointerY * Math.exp(-dt * 3)
@@ -53,7 +56,7 @@ class Runtime {
     s.micLevel = this.mic.level
     s.micLow = this.mic.low
     s.micHigh = this.mic.high
-    let eff = applyRoutes(scene, s)
+    let eff = applyRoutes(scene, s, this.routes)
     eff = applyMotion(eff, this.time, playing ? dt : 0, p, this.motion)
     this.effective = eff
     this.listeners.forEach((f) => f())
@@ -79,13 +82,14 @@ export const runtime = new Runtime()
 export function isAnimated(scene: Scene, pointerOn: boolean, micOn: boolean) {
   const m = scene.material,
     w = scene.warp
+  const aurora = scene.look.colorMode === "aurora" || scene.layers.some((l) => l.look?.colorMode === "aurora")
   return (
     scene.routes.length > 0 ||
     scene.layers.some((l) => l.motion.type !== "none") ||
     w.wave > 0 ||
     w.flow > 0 ||
     (pointerOn && w.pointer !== 0) ||
-    (m.colorMode === "aurora" && m.auroraSpeed > 0) ||
+    (aurora && m.auroraSpeed > 0) ||
     m.grain > 0 ||
     micOn
   )

@@ -16,15 +16,14 @@ const dateFmt = new Intl.DateTimeFormat("ru", { day: "numeric", month: "long", h
 
 export function Collection() {
   const collection = useStore((s) => s.collection)
-  const versions = useStore((s) => s.versions)
+  const sets = useStore((s) => s.sets)
   const st = useStore.getState()
   const [deleting, setDeleting] = useState<SavedScene | null>(null)
   const [renaming, setRenaming] = useState<SavedScene | null>(null)
   const [name, setName] = useState("")
 
   function open(item: SavedScene) {
-    if (versions.some((v) => v.id === item.alphabetId) && item.alphabetId !== useStore.getState().alphabetId)
-      st.setAlphabetVersion(item.alphabetId)
+    // The scene names its own glyph set: opening it never switches sets globally.
     st.replaceScene(item.scene)
     st.setTab("studio")
   }
@@ -52,7 +51,7 @@ export function Collection() {
     <ScrollArea className="min-h-0 flex-1">
       <ul className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3 pb-3">
         {collection.map((item) => {
-          const version = versions.find((v) => v.id === item.alphabetId)
+          const version = sets.find((v) => v.id === item.scene.set)
           return (
             <li key={item.id}>
               <Card className="gap-0 overflow-hidden py-0">
@@ -68,7 +67,7 @@ export function Collection() {
                 <CardHeader className="border-t py-3">
                   <CardTitle className="truncate">{item.name}</CardTitle>
                   <CardDescription>
-                    {dateFmt.format(item.created)} · {version ? version.name : "алфавит удалён"}
+                    {dateFmt.format(item.created)} · {version ? version.name : "сет удалён"}
                   </CardDescription>
                   <CardAction>
                     <DropdownMenu>
@@ -92,7 +91,7 @@ export function Collection() {
                         <DropdownMenuItem
                           onClick={() =>
                             download(
-                              new Blob([JSON.stringify(makeRecipe(item.scene, version?.name ?? "—", version?.glyphs ?? {}), null, 2)], {
+                              new Blob([JSON.stringify(makeRecipe(item.scene, sets), null, 2)], {
                                 type: "application/json",
                               }),
                               fileStem(item.scene) + ".json",

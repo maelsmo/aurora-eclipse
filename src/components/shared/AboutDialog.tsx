@@ -22,9 +22,8 @@ const W = 260,
   H = 230
 
 function Figure({ char }: { char: string }) {
-  const alphabet = useStore((s) => s.alphabet)
-  const revision = useStore((s) => s.revision)
-  const g = compileGlyph(char, alphabet, defaultAxes, revision)
+  const entry = useStore((s) => s.library.sets[s.library.fallback])
+  const g = compileGlyph(char, entry.alphabet, defaultAxes, entry.version)
   const ax = (g.box.x0 + g.box.x1) / 2
   const scene = useMemo(
     () =>

@@ -1,7 +1,16 @@
 // Browser storage. Every access is guarded: private windows, full quotas and
 // blocked storage must never break the app.
 
+/** Current keys. Everything is written here only. */
 export const KEYS = {
+  draft: "ae:v3:draft",
+  collection: "ae:v3:collection",
+  sets: "ae:v3:sets",
+  ui: "ae:v3:ui",
+} as const
+
+/** Keys of the v2 app: read once for migration, never written. */
+export const KEYS_V2 = {
   draft: "ae:v2:draft",
   collection: "ae:v2:collection",
   alphabets: "ae:v2:alphabets",

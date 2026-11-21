@@ -1,7 +1,7 @@
 // Export: vector contours (SVG), raster (PNG), motion (WebM) and the recipe (JSON).
 import type { Frame } from "../frame"
-import type { Material, Scene } from "../scene"
-import type { GlyphDef } from "../types"
+import type { Material, Scene } from "../scene/types"
+import type { GlyphSet } from "../alphabet/sets"
 import { frameToSVG, type SvgOptions } from "./svg"
 import type { SvgRequest, SvgResponse } from "./worker"
 
@@ -42,19 +42,23 @@ export function exportSVG(frame: Frame, material: Material, opts: SvgOptions = {
 
 export type Recipe = {
   format: "aurora-eclipse/scene"
-  version: 2
+  version: 3
   created: string
   scene: Scene
-  alphabet: { name: string; glyphs: Record<string, GlyphDef> }
+  /** Glyph sets the scene uses (only their edited glyphs). */
+  sets: GlyphSet[]
 }
 
-export function makeRecipe(scene: Scene, alphabetName: string, glyphs: Record<string, GlyphDef>): Recipe {
+/** The JSON recipe: the scene and every glyph set it refers to. */
+export function makeRecipe(scene: Scene, sets: GlyphSet[]): Recipe {
+  const used = new Set<string>([scene.set])
+  for (const l of scene.layers) if (l.type === "letter" && l.set) used.add(l.set)
   return {
     format: "aurora-eclipse/scene",
-    version: 2,
+    version: 3,
     created: new Date().toISOString(),
     scene,
-    alphabet: { name: alphabetName, glyphs },
+    sets: sets.filter((s) => used.has(s.id)),
   }
 }
 
@@ -92,4 +96,4 @@ export function recordCanvas(canvas: HTMLCanvasElement, seconds: number, onProgr
 }
 
 export const fileStem = (scene: Scene) =>
-  "aurora-eclipse_" + (scene.layers.map((l) => l.char).join("") || "scene").slice(0, 24)
+  "aurora-eclipse_" + (scene.layers.map((l) => (l.type === "letter" ? l.char : "")).join("") || "scene").slice(0, 24)

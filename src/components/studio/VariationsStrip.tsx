@@ -119,7 +119,7 @@ export function VariationsStrip() {
             <li key={seed + ":" + i}>
               <button
                 type="button"
-                aria-label={`Применить вариант ${i + 1}: ${v.layers.map((l) => l.char).join(" ")}`}
+                aria-label={`Применить вариант ${i + 1}: ${v.layers.map((l) => (l.type === "letter" ? l.char : "")).join(" ")}`}
                 onClick={() => replaceScene(v)}
                 className="block aspect-[4/3] w-full overflow-hidden rounded-lg border outline-none transition hover:border-foreground/40 focus-visible:ring-3 focus-visible:ring-ring/50"
                 style={{ background: v.material.transparent ? undefined : v.material.background }}

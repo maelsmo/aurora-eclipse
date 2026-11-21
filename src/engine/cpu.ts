@@ -2,7 +2,7 @@
 // ground truth for the GPU parity check. Items are composited in z-order;
 // fill and outline only.
 import { hexToRgb, sampleItem, type Frame } from "./frame"
-import type { Material } from "./scene"
+import type { Material } from "./scene/types"
 import type { View } from "./gpu/renderer"
 
 export function rasterize(
@@ -31,7 +31,7 @@ export function rasterize(
         A = bgA
       for (const it of frame.items) {
         const s = sampleItem(frame, it, wx, wy, px)
-        const d = it.look.fill === "outline" ? Math.abs(s.d) - it.look.line / 2 : s.d
+        const d = it.look.mode === "outline" ? Math.abs(s.d) - it.look.line / 2 : s.d
         const a = Math.max(0, Math.min(1, 0.5 - d / px)) * it.opacity
         if (a <= 0) continue
         let [cr, cg, cb] = s.color

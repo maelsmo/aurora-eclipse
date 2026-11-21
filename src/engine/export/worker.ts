@@ -1,7 +1,7 @@
 // Web Worker: traces the SVG off the main thread and reports progress.
 import { frameToSVG, type SvgOptions } from "./svg"
 import type { Frame } from "../frame"
-import type { Material } from "../scene"
+import type { Material } from "../scene/types"
 
 export type SvgRequest = { id: number; frame: Frame; material: Material; opts: SvgOptions }
 export type SvgResponse =

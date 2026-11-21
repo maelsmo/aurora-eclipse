@@ -29,7 +29,7 @@ export const MAX_INSTANCES = 4096
 
 /** Primitive kinds as stored on the GPU (ring = full-circle arc). */
 export const KIND = { stroke: 0, arc: 1, dot: 2, hole: 3, slot: 4, ring: 5 } as const
-export const FILL = { fill: 0, outline: 1, isolines: 2, halftone: 3 } as const
+export const FILL = { fill: 0, outline: 1, isolines: 2, halftone: 3, lines: 4 } as const
 export const COLOR_MODE = { layer: 0, aurora: 1, depth: 2 } as const
 /** Instance kinds (selects the fragment program). */
 export const INSTANCE = { cluster: 0 } as const
@@ -118,11 +118,11 @@ function writeGlyph(P: Float32Array, g: CompiledGlyph, start: number, count: num
   }
 }
 
-const lookKey = (l: FrameLook) => `${l.fill}|${l.line}|${l.spacing}|${l.rings}|${l.dot}|${l.colorMode}`
+const lookKey = (l: FrameLook) => `${l.mode}|${l.line}|${l.spacing}|${l.rings}|${l.dot}|${l.stripes}|${l.stripeFill}|${l.inset}|${l.colorMode}`
 
 /** How far the drawing of a look reaches beyond the shape, modules. */
 export function lookReach(l: FrameLook) {
-  switch (l.fill) {
+  switch (l.mode) {
     case "outline":
       return l.line * 0.5
     case "isolines":
@@ -185,7 +185,7 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
       const o = look * LOOK_TEXELS * 4
       const lk = item.look
       K.fill(0, o, o + LOOK_TEXELS * 4)
-      K.set([FILL[lk.fill], lk.line, lk.spacing, lk.rings, lk.dot, COLOR_MODE[lk.colorMode], 0, 0], o)
+      K.set([FILL[lk.mode], lk.line, lk.spacing, lk.rings, lk.dot, COLOR_MODE[lk.colorMode], lk.inset, 0, lk.stripes, lk.stripeFill, 0, 0], o)
     }
     const start = li
     for (const layer of item.layers.slice(0, MAX_CLUSTER)) {
@@ -194,7 +194,7 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
       const g = layer.glyph
       L.set(
         [
-          ps, pc, opIndex(layer.op), 0,
+          ps, pc, opIndex(layer.op), layer.mirror,
           layer.x, layer.y, layer.cos, layer.sin,
           layer.scale, layer.ax, layer.ay, g.shear,
           g.fillet, g.cutK, g.attract, g.ink,

@@ -1,12 +1,52 @@
 import { describe, expect, it } from "vitest"
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { defaultAlphabet } from "../alphabet"
-import { layoutText, makeLayer, makeScene, sanitizeScene } from "../scene"
-import { applyRoutes, modulate } from "../modulation"
+import { defaultLibrary } from "../alphabet/sets"
+import {
+  deleteNodes,
+  duplicateNodes,
+  groupNodes,
+  isGroup,
+  isLetter,
+  layoutText,
+  makeGroup,
+  makeLayer,
+  makeScene,
+  mergeScene,
+  moveNode,
+  normalize,
+  sanitizeScene,
+  shiftNode,
+  subtreeEnd,
+  ungroup,
+  worldXf,
+  type Layer,
+} from "../scene"
+import { applyMotion, applyRoutes, modulate, routeSignal } from "../modulation"
 import { emptySignals, lfoValue } from "../signals"
 import { presets } from "../presets"
 import { mutateScene, randomScene, noLocks } from "../variations"
 import { defaultAxes } from "../axes"
-import { buildFrame, sampleFrame } from "../frame"
+import { buildFrame, frameLayers, sampleFrame } from "../frame"
+import { readParam, writePath } from "../params"
+
+const ctx = { sets: ["main"], fallbackSet: "main" }
+const lib = defaultLibrary()
+const fixture = JSON.parse(readFileSync(fileURLToPath(new URL("./fixtures/v2-storage.json", import.meta.url)), "utf8"))
+
+/** Pre-order + contiguous subtrees + parents exist. */
+function validTree(layers: Layer[]) {
+  const ids = new Set(layers.map((l) => l.id))
+  layers.forEach((l, i) => {
+    if (l.parent) {
+      expect(ids.has(l.parent)).toBe(true)
+      const p = layers.findIndex((x) => x.id === l.parent)
+      expect(p).toBeLessThan(i)
+      expect(i).toBeLessThan(subtreeEnd(layers, p))
+    }
+  })
+}
 
 describe("scene", () => {
   it("lays text out centred on one baseline", () => {
@@ -17,20 +57,182 @@ describe("scene", () => {
     expect(layers.every((l) => l.y === 0)).toBe(true)
     expect(layoutText("Aё", defaultAlphabet, defaultAxes, 0.5).map((l) => l.char)).toEqual(["A", "Ё"])
   })
-  it("survives a JSON round trip and rejects junk", () => {
+  it("survives a JSON round trip, sanitize is idempotent", () => {
     for (const p of presets) {
       const s = p.make()
-      expect(sanitizeScene(JSON.parse(JSON.stringify(s)), defaultAlphabet)).toEqual(s)
+      const once = sanitizeScene(JSON.parse(JSON.stringify(s)), ctx)!
+      expect(once).toEqual(s)
+      expect(sanitizeScene(JSON.parse(JSON.stringify(once)), ctx)).toEqual(once)
     }
-    expect(sanitizeScene(null, defaultAlphabet)).toBeNull()
+  })
+  it("rejects junk and clamps ranges without dropping objects", () => {
+    expect(sanitizeScene(null, ctx)).toBeNull()
     const bad = sanitizeScene(
-      { layers: [{ char: "A", op: "boom", color: "red", x: "1" }, { char: "@" }], axes: { weight: "x" } },
-      defaultAlphabet,
+      {
+        v: 3,
+        set: "nope",
+        layers: [
+          { type: "letter", char: "A", op: "boom", color: "red", x: "1", scale: 1e9, set: "ghost" },
+          { type: "letter", char: "@" },
+          { type: "letter", char: 42 },
+          { type: "shape", shape: { kind: "blob", w: -5, sides: 99 } },
+          { type: "group", mode: "weird", parent: "missing" },
+          "junk",
+        ],
+        axes: { weight: "x" },
+      },
+      ctx,
     )!
-    expect(bad.layers).toHaveLength(1)
-    expect(bad.layers[0].op).toBe("union")
-    expect(bad.layers[0].color).toBe("#161616")
+    expect(bad.set).toBe("main")
+    expect(bad.layers).toHaveLength(5)
+    const [a, at, junk, shape, group] = bad.layers
+    expect(a.op).toBe("union")
+    expect(a.color).toBe("#161616")
+    expect(a.scale).toBe(20)
+    expect(isLetter(a) && a.set).toBeFalsy()
+    expect(isLetter(at) && at.char).toBe("@")
+    expect(isLetter(junk) && junk.char).toBe("A")
+    expect(shape.type === "shape" && shape.shape).toMatchObject({ kind: "rect", w: 0.05, sides: 24 })
+    expect(isGroup(group) && group.mode).toBe("stack")
+    expect(group.parent).toBeUndefined()
     expect(bad.axes.weight).toBe(1)
+  })
+})
+
+describe("migration v2 → v3", () => {
+  const v2 = fixture["ae:v2:collection"][0].scene
+
+  it("puts every v2 layer into one merge group and keeps the data", () => {
+    const s = sanitizeScene(v2, { sets: ["main", "x"], fallbackSet: "x" })!
+    expect(s.v).toBe(3)
+    expect(s.set).toBe("x")
+    const [g, ...rest] = s.layers
+    expect(isGroup(g) && g.mode).toBe("merge")
+    expect(rest).toHaveLength(4)
+    expect(rest.every((l) => l.parent === g.id)).toBe(true)
+    expect(rest.map((l) => (isLetter(l) ? l.char : ""))).toEqual(["А", "Н", "Н", "А"])
+    expect(rest.map((l) => l.color)).toEqual(["#161616", "#F2542D", "#5B3CF5", "#161616"])
+    expect(rest[3].motion.type).toBe("orbit")
+    expect(s.look).toMatchObject({ mode: "isolines", line: 0.07, spacing: 0.3, rings: 8 })
+    expect(s.warp).toMatchObject({ wave: 0.47, flow: 1.17 })
+    expect(s.lfo).toHaveLength(4)
+    expect(s.speed).toBe(1.19)
+    validTree(s.layers)
+  })
+  it("draws the same field as the flat v2 fold", () => {
+    const s = sanitizeScene(v2, ctx)!
+    const f = buildFrame(s, lib, 0, [1e4, 1e4])
+    expect(f.items).toHaveLength(1)
+    expect(frameLayers(f).map((l) => l.id)).toEqual(v2.layers.map((l: { id: string }) => l.id))
+    // Identity group transform: world placement equals the stored v2 coordinates.
+    frameLayers(f).forEach((l, i) => {
+      expect(l.x).toBeCloseTo(v2.layers[i].x, 9)
+      expect(l.y).toBeCloseTo(v2.layers[i].y, 9)
+    })
+  })
+  it("moves routes to renamed parameters", () => {
+    const s = sanitizeScene(
+      { ...v2, routes: [{ id: "r", source: "lfo1", target: "material.spacing", amount: 0.3 }, { id: "q", source: "lfo2", target: "material.glow", amount: 0.1 }] },
+      ctx,
+    )!
+    expect(s.routes.map((r) => r.target)).toEqual(["look.spacing", "material.glow"])
+  })
+  it("migrates a v3 scene idempotently", () => {
+    const once = sanitizeScene(v2, ctx)!
+    expect(sanitizeScene(JSON.parse(JSON.stringify(once)), ctx)).toEqual(once)
+  })
+})
+
+describe("tree", () => {
+  const scene = () => {
+    const a = makeLayer("A", { x: 2, y: 1 })
+    const b = makeLayer("B", { x: -2, y: 0 })
+    const c = makeLayer("C", { x: 4, y: -3, rotation: 30 })
+    return makeScene({ layers: [a, b, c] })
+  }
+
+  it("normalize repairs cycles, dangling parents and merge nesting", () => {
+    const g1 = makeGroup("stack", { id: "g1", parent: "g2" })
+    const g2 = makeGroup("stack", { id: "g2", parent: "g1" })
+    const m = makeGroup("merge", { id: "m" })
+    const inner = makeGroup("stack", { id: "inner", parent: "m" })
+    const leaf = makeLayer("A", { id: "leaf", parent: "inner" })
+    const lost = makeLayer("B", { id: "lost", parent: "nowhere" })
+    const out = normalize([leaf, g1, g2, m, inner, lost])
+    validTree(out)
+    expect(out.find((l) => l.id === "lost")!.parent).toBeUndefined()
+    expect(out.find((l) => l.id === "inner")!.parent).toBeUndefined()
+    expect(out.find((l) => l.id === "leaf")!.parent).toBe("inner")
+  })
+
+  it("grouping keeps world placement; ungrouping restores it", () => {
+    const s = scene()
+    const before = s.layers.map((l) => worldXf(s.layers, l.id))
+    const { scene: g, id } = groupNodes(s, [s.layers[0].id, s.layers[2].id], "stack")
+    validTree(g.layers)
+    expect(g.layers.find((l) => l.id === id)).toBeTruthy()
+    for (const [k, l] of s.layers.entries()) {
+      const w = worldXf(g.layers, l.id)
+      expect(w.x).toBeCloseTo(before[k].x, 9)
+      expect(w.y).toBeCloseTo(before[k].y, 9)
+      expect(Math.atan2(w.sin, w.cos)).toBeCloseTo(Math.atan2(before[k].sin, before[k].cos), 9)
+    }
+    // Rotate and scale the group, then ungroup: children keep the new world placement.
+    const turned = { ...g, layers: g.layers.map((l) => (l.id === id ? { ...l, rotation: 90, scale: 2, flipX: true } : l)) }
+    const mid = turned.layers.filter((l) => l.parent === id).map((l) => worldXf(turned.layers, l.id))
+    const u = ungroup(turned, id!)
+    validTree(u.layers)
+    turned.layers
+      .filter((l) => l.parent === id)
+      .forEach((l, k) => {
+        const w = worldXf(u.layers, l.id)
+        expect(w.x).toBeCloseTo(mid[k].x, 9)
+        expect(w.y).toBeCloseTo(mid[k].y, 9)
+        expect(w.s).toBeCloseTo(mid[k].s, 9)
+        expect(w.m).toBe(mid[k].m)
+        expect(w.cos).toBeCloseTo(mid[k].cos, 9)
+      })
+  })
+
+  it("moves keep world placement and z-order follows the array", () => {
+    const s = scene()
+    const { scene: g, id } = groupNodes(s, [s.layers[1].id], "stack")
+    const moved = moveNode(g, s.layers[0].id, id!, 0)
+    validTree(moved.layers)
+    const w = worldXf(moved.layers, s.layers[0].id)
+    expect(w.x).toBeCloseTo(2, 9)
+    expect(w.y).toBeCloseTo(1, 9)
+    const up = shiftNode(s, s.layers[0].id, 1)
+    expect(up.layers.map((l) => l.id)).toEqual([s.layers[1].id, s.layers[0].id, s.layers[2].id])
+  })
+
+  it("delete and duplicate carry routes with the nodes", () => {
+    const s = scene()
+    const id = s.layers[0].id
+    s.routes = [
+      { id: "1", source: "lfo1", target: `layer:${id}.x`, amount: 0.2 },
+      { id: "2", source: "lfo1", target: `layer:${id}x.x`, amount: 0.2 },
+      { id: "3", source: "lfo2", target: "axes.weight", amount: 0.1 },
+    ]
+    const dup = duplicateNodes(s, [id])
+    expect(dup.scene.layers).toHaveLength(4)
+    expect(dup.scene.routes.filter((r) => r.target === `layer:${dup.ids[0]}.x`)).toHaveLength(1)
+    const del = deleteNodes(s, [id])
+    // Only the route of the deleted node goes (not the one whose id merely shares a prefix).
+    expect(del.routes.map((r) => r.id)).toEqual(["2", "3"])
+  })
+
+  it("composes group transforms into frame layers", () => {
+    const leaf = makeLayer("O", { x: 1, y: 0 })
+    const s = mergeScene([leaf], {}, { x: 10, y: 5, rotation: 90, scale: 2 })
+    const f = buildFrame(s, lib, 0, [1e4, 1e4])
+    const l = frameLayers(f)[0]
+    expect(l.x).toBeCloseTo(10, 9)
+    expect(l.y).toBeCloseTo(7, 9)
+    expect(l.scale).toBeCloseTo(2, 9)
+    // The rotated, scaled O is still sampled correctly at its world centre.
+    expect(sampleFrame(f, 10, 7).d).toBeGreaterThan(0)
+    expect(sampleFrame(f, 10, 7 + 2 * 1.5).d).toBeLessThan(0.3)
   })
 })
 
@@ -39,18 +241,46 @@ describe("modulation", () => {
     expect(modulate(1, 0.5, 1, 0.4, 1.6)).toBeCloseTo(1.6)
     expect(modulate(1, 0.25, -1, 0.4, 1.6)).toBeCloseTo(0.7)
   })
-  it("routes signals into axes and layers", () => {
-    const s = makeScene({ layers: [makeLayer("A")] })
-    const id = s.layers[0].id
+  it("routes signals into axes, looks and node paths", () => {
+    const s = mergeScene([makeLayer("A")])
+    const id = s.layers[1].id
     s.routes = [
       { id: "1", source: "micLevel", target: "axes.weight", amount: 0.25 },
       { id: "2", source: "lfo1", target: `layer:${id}.k`, amount: 0.1 },
+      { id: "3", source: "lfo2", target: `layer:${id}.look.line`, amount: 0.5 },
+      { id: "4", source: "lfo2", target: "look.spacing", amount: 0.1 },
     ]
-    const sig = { ...emptySignals(), micLevel: 1, lfo1: -1 }
+    const sig = { ...emptySignals(), micLevel: 1, lfo1: -1, lfo2: 1 }
     const e = applyRoutes(s, sig)
     expect(e.axes.weight).toBeCloseTo(1.3)
-    expect(e.layers[0].k).toBeCloseTo(0.3)
+    expect(e.layers[1].k).toBeCloseTo(0.3)
+    expect(e.layers[1].look?.line).toBeCloseTo(0.12 + 0.5 * 0.78, 6)
+    expect(e.look.spacing).toBeCloseTo(0.35 + 0.142, 6)
     expect(s.axes.weight).toBe(1) // the stored scene is untouched
+    expect(s.layers[1].look).toBeUndefined()
+    expect(readParam(e, `layer:${id}.look.line`)).toBeCloseTo(0.51, 6)
+  })
+  it("writes by path without mutating", () => {
+    const o = { a: { b: 1, c: [1] }, d: 2 }
+    const n = writePath(o, ["a", "b"], 5)
+    expect(n.a.b).toBe(5)
+    expect(o.a.b).toBe(1)
+    expect(n.a.c).toBe(o.a.c)
+  })
+  it("threshold gates switch with hysteresis; invert flips", () => {
+    const st = new Map<string, boolean>()
+    const r = { id: "g", source: "micLevel" as const, target: "axes.weight", amount: 1, threshold: 0.5 }
+    const at = (v: number) => routeSignal(r, { ...emptySignals(), micLevel: v }, st)
+    expect([at(0.52), at(0.6), at(0.52), at(0.44), at(0.52)]).toEqual([0, 1, 1, 0, 0])
+    expect(routeSignal({ ...r, threshold: undefined, invert: true }, { ...emptySignals(), micLevel: 0.2 })).toBeCloseTo(0.8)
+  })
+  it("orbit circles a sibling, not a node of another group", () => {
+    const a = makeLayer("A", { x: 0, y: 0 })
+    const b = makeLayer("B", { x: 3, y: 0, motion: { type: "orbit", amount: 1, speed: 0.25, phase: 0 } })
+    const s = mergeScene([a, b])
+    const e = applyMotion(s, 1, 0, null, new Map())
+    expect(e.layers[2].x).toBeCloseTo(0, 6)
+    expect(e.layers[2].y).toBeCloseTo(3, 6)
   })
   it("oscillators stay within −1…1", () => {
     for (const shape of ["sine", "triangle", "noise", "pulse"] as const)
@@ -63,21 +293,30 @@ describe("modulation", () => {
 })
 
 describe("variations", () => {
+  const letters = (s: ReturnType<typeof presets[0]["make"]>) => s.layers.filter(isLetter)
   it("are deterministic for a seed and keep locked parts", () => {
     const base = presets[0].make()
     const a = randomScene(42, "AEOS", base, noLocks)
     const b = randomScene(42, "AEOS", base, noLocks)
-    expect(a.layers.map((l) => [l.char, l.op, l.x])).toEqual(b.layers.map((l) => [l.char, l.op, l.x]))
+    expect(letters(a).map((l) => [l.char, l.op, l.x])).toEqual(letters(b).map((l) => [l.char, l.op, l.x]))
+    validTree(a.layers)
     const m = mutateScene(7, "AEOS", base, 1, { letters: true, combine: true, form: true, material: true })
-    expect(m.layers.map((l) => [l.char, l.op, l.x, l.y])).toEqual(base.layers.map((l) => [l.char, l.op, l.x, l.y]))
+    expect(letters(m).map((l) => [l.char, l.op, l.x, l.y])).toEqual(letters(base).map((l) => [l.char, l.op, l.x, l.y]))
     expect(m.axes).toEqual(base.axes)
+    validTree(m.layers)
+  })
+  it("mutations keep routes pointing at the new ids", () => {
+    const base = presets.find((p) => p.id === "morph")!.make()
+    const m = mutateScene(3, "AE", base, 0.5, noLocks)
+    const id = m.routes[0].target.match(/^layer:([^.]+)\./)![1]
+    expect(m.layers.some((l) => l.id === id)).toBe(true)
   })
 })
 
 describe("composition", () => {
   it("eclipse keeps a gap between the letters of the AE preset", () => {
     const s = presets[0].make()
-    const f = buildFrame(s, defaultAlphabet, 0, 0, [1e4, 1e4])
+    const f = buildFrame(s, lib, 0, [1e4, 1e4])
     // Sample a horizontal line through the middle: inside → gap → inside again.
     let transitions = 0,
       prev = false
@@ -87,5 +326,12 @@ describe("composition", () => {
       prev = inside
     }
     expect(transitions).toBeGreaterThanOrEqual(4)
+  })
+  it("objects outside merge groups become separate items in z-order", () => {
+    const a = makeLayer("A", { x: -3 })
+    const b = makeLayer("B", { x: 3 })
+    const s = makeScene({ layers: [a, b] })
+    const f = buildFrame(s, lib, 0, [1e4, 1e4])
+    expect(f.items.map((it) => it.id)).toEqual([a.id, b.id])
   })
 })

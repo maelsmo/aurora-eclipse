@@ -7,9 +7,12 @@ import { cn } from "@/lib/utils"
 /** Grid of glyphs from the current alphabet, split by script. */
 export function GlyphPicker({
   value,
+  set,
   onPick,
 }: {
   value?: string
+  /** Glyph set shown; defaults to the scene set. */
+  set?: string
   onPick: (c: string) => void
 }) {
   const [script, setScript] = useState(value && cyrillicOrder.includes(value) ? "cyr" : "lat")
@@ -40,7 +43,7 @@ export function GlyphPicker({
               c === value && "border-primary bg-muted",
             )}
           >
-            <GlyphThumb char={c} className="pointer-events-none" />
+            <GlyphThumb char={c} set={set} className="pointer-events-none" />
           </button>
         ))}
       </div>

@@ -5,8 +5,8 @@ import { buildRegions, foldFronts, regionAt } from "../export/regions"
 import { frameToSVG } from "../export/svg"
 import { sdStroke } from "../sdf"
 import { buildFrame, sampleFrame } from "../frame"
-import { makeLayer, makeScene } from "../scene"
-import { defaultAlphabet } from "../alphabet"
+import { makeLayer, mergeScene } from "../scene"
+import { defaultLibrary } from "../alphabet/sets"
 import { presets } from "../presets"
 import { opRole } from "../operators"
 import type { Vec } from "../types"
@@ -70,16 +70,14 @@ describe("tracer", () => {
 
 describe("colour regions", () => {
   const scene = () => {
-    const s = makeScene({
-      layers: [
-        makeLayer("O", { color: "#161616" }),
-        makeLayer("X", { x: 1.6, op: "inlay", gap: 0.2, color: "#F2542D" }),
-        makeLayer("I", { x: -0.8, op: "union", color: "#5B3CF5" }),
-        makeLayer("H", { x: 0.4, y: 1, op: "intersect", color: "#1E8C6E", scale: 2.4 }),
-        makeLayer("E", { x: 3.5, op: "eclipse", gap: 0.15, color: "#E9B824" }),
-      ],
-    })
-    return buildFrame(s, defaultAlphabet, 0, 0, [1e4, 1e4])
+    const s = mergeScene([
+      makeLayer("O", { color: "#161616" }),
+      makeLayer("X", { x: 1.6, op: "inlay", gap: 0.2, color: "#F2542D" }),
+      makeLayer("I", { x: -0.8, op: "union", color: "#5B3CF5" }),
+      makeLayer("H", { x: 0.4, y: 1, op: "intersect", color: "#1E8C6E", scale: 2.4 }),
+      makeLayer("E", { x: 3.5, op: "eclipse", gap: 0.15, color: "#E9B824" }),
+    ])
+    return buildFrame(s, defaultLibrary(), 0, [1e4, 1e4])
   }
 
   it("region colour equals sampleFrame().color away from the borders", () => {
@@ -105,14 +103,14 @@ describe("colour regions", () => {
 
   it("one colour gives one region", () => {
     const s = presets.find((p) => p.id === "wordmark")!.make()
-    const f = buildFrame(s, defaultAlphabet, 0, 0, [1e4, 1e4])
+    const f = buildFrame(s, defaultLibrary(), 0, [1e4, 1e4])
     expect(buildRegions(f, f.items[0])).toHaveLength(1)
   })
 
   it("builds a finite SVG for every preset", () => {
     for (const p of presets.slice(0, 4)) {
       const s = p.make()
-      const f = buildFrame(s, defaultAlphabet, 0, 0, [1e4, 1e4])
+      const f = buildFrame(s, defaultLibrary(), 0, [1e4, 1e4])
       const svg = frameToSVG(f, s.material, { trace: { step: 0.08 } })
       expect(svg.startsWith("<svg")).toBe(true)
       expect(svg).toContain("<path")

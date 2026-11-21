@@ -5,7 +5,7 @@ import { compileGlyph, glyphAdvance, glyphPrims } from "@/engine/compile"
 import { makeLayer, makeScene } from "@/engine/scene"
 import { CAP, OVERHANG, snap } from "@/engine/grid"
 import type { ArcDef, PrimDef, Vec } from "@/engine/types"
-import { useStore } from "@/state/store"
+import { editingAlphabet, useStore } from "@/state/store"
 import { editAxes, editTarget, withPrims, type Tool } from "./editing"
 
 type Handle = "a" | "b" | "c" | "r" | "a0" | "a1" | "body" | "adv"
@@ -42,8 +42,9 @@ export function GlyphEditor({
   onSelect: (i: number | null) => void
 }) {
   const editing = useStore((s) => s.editing)
-  const alphabet = useStore((s) => s.alphabet)
-  const revision = useStore((s) => s.revision)
+  const alphabet = useStore(editingAlphabet)
+  const library = useStore((s) => s.library)
+  const editingSet = useStore((s) => s.editingSet)
   const studioAxes = useStore((s) => s.scene.axes)
   const setGlyph = useStore((s) => s.setGlyph)
   const { target, def } = editTarget(editing, alphabet)
@@ -96,13 +97,15 @@ export function GlyphEditor({
     if (!r || !size.w) return
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     r.resize(size.w * dpr, size.h * dpr)
-    const g = compileGlyph(editing, alphabet, axes, revision)
+    const entry = library.sets[editingSet]
+    const g = compileGlyph(editing, alphabet, axes, entry?.version ?? 0)
     const ax = (g.box.x0 + g.box.x1) / 2
     const scene = makeScene({
       axes,
+      set: editingSet,
       layers: [makeLayer(editing, { x: ax, y: CAP / 2, color: "#C9C3EE" })],
     })
-    const frame = buildFrame(scene, alphabet, revision, 0, [1e4, 1e4])
+    const frame = buildFrame(scene, library, 0, [1e4, 1e4])
     const cx = bx0 + (size.w / 2 - offX) / s,
       cy = by1 - (size.h / 2 - offY) / s
     r.render(frame, { ...scene.material, transparent: true }, { cx, cy, scale: s * dpr })

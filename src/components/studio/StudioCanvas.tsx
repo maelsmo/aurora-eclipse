@@ -18,11 +18,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { GlyphRenderer, type View } from "@/engine/gpu/renderer"
 import { rasterize } from "@/engine/cpu"
-import { buildFrame, frameBounds, frameLayers, pickLayer, type Frame } from "@/engine/frame"
-import { fitView, materialReach, sceneFrame } from "@/engine/view"
+import { buildFrame, frameBounds, frameLayers, layerToWorld, pickLayer, type Frame } from "@/engine/frame"
+import { fitView, sceneFrame } from "@/engine/view"
 import { snap } from "@/engine/grid"
 import { CAP } from "@/engine/grid"
-import type { Scene } from "@/engine/scene"
+import { deleteNodes, parentXf, xfApply, xfInvert, type Scene } from "@/engine/scene"
 import { useStore } from "@/state/store"
 import { runtime, isAnimated } from "@/state/runtime"
 import { MicButton } from "./MicButton"
@@ -43,7 +43,7 @@ function drawOverlay(
   h: number,
   view: View,
   frame: Frame,
-  selectedId: string | null,
+  selected: string[],
   hoverId: string | null,
   grid: boolean,
   dark: boolean,
@@ -81,9 +81,8 @@ function drawOverlay(
     if (!l) return
     const g = l.glyph.box
     const pt = (gx: number, gy: number) => {
-      const lx = (gx - l.ax) * l.scale,
-        ly = (gy - l.ay) * l.scale
-      return [X(l.x + l.cos * lx - l.sin * ly), Y(l.y + l.sin * lx + l.cos * ly)]
+      const [wx, wy] = layerToWorld(l, gx, gy)
+      return [X(wx), Y(wy)]
     }
     ctx.strokeStyle = style
     ctx.lineWidth = lw * dpr
@@ -106,8 +105,8 @@ function drawOverlay(
     }
   }
   if (grid) layers.forEach((l) => box(l.id, `rgba(${ink},0.18)`, 1, true))
-  if (hoverId && hoverId !== selectedId) box(hoverId, `rgba(${ink},0.35)`, 1, false)
-  if (selectedId) box(selectedId, "rgba(91,60,245,0.95)", 1.5, false)
+  if (hoverId && !selected.includes(hoverId)) box(hoverId, `rgba(${ink},0.35)`, 1, false)
+  for (const id of selected) box(id, "rgba(91,60,245,0.95)", 1.5, false)
 }
 
 export function StudioCanvas() {
@@ -121,7 +120,7 @@ export function StudioCanvas() {
   const fitRef = useRef<() => void>(() => {})
   const hover = useRef<string | null>(null)
   const drag = useRef<
-    | { kind: "layer"; id: string; start: [number, number]; origin: [number, number] }
+    | { kind: "layer"; ids: string[]; start: [number, number]; origins: Map<string, [number, number]> }
     | { kind: "pan"; start: [number, number]; origin: [number, number] }
     | null
   >(null)
@@ -160,7 +159,7 @@ export function StudioCanvas() {
       if (!el.clientWidth || !el.clientHeight) return
       fitted = true
       const st = useStore.getState()
-      const f = sceneFrame(st.scene, st.alphabet, st.revision)
+      const f = sceneFrame(st.scene, st.library)
       const v = fitView(frameBounds(f, 1), el.clientWidth, el.clientHeight, 0.08)
       zoom.current = Math.min(v.scale, 160)
       center.current = [v.cx, v.cy]
@@ -179,7 +178,7 @@ export function StudioCanvas() {
       const animated = st.playing && isAnimated(st.scene, st.pointerOn, micOn)
       const eff = runtime.step(st.scene, dt, st.playing, st.pointerOn)
       const pointer = st.pointerOn && runtime.pointerWorld ? runtime.pointerWorld : FAR
-      const frame = buildFrame(eff, st.alphabet, st.revision, runtime.time, pointer, materialReach(eff.material))
+      const frame = buildFrame(eff, st.library, runtime.time, pointer)
       runtime.frame = frame
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
       const cw = el.clientWidth,
@@ -295,13 +294,25 @@ export function StudioCanvas() {
     ;(e.target as Element).setPointerCapture(e.pointerId)
     runtime.pointerDown = true
     const id = runtime.frame ? pickLayer(runtime.frame, w[0], w[1], 0.15) : null
-    if (id && e.button === 0 && !e.shiftKey) {
-      const layer = st.scene.layers.find((l) => l.id === id)
-      if (layer) {
-        st.select(id)
-        drag.current = { kind: "layer", id, start: w, origin: [layer.x, layer.y] }
+    const layer = id ? st.scene.layers.find((l) => l.id === id) : undefined
+    if (layer && e.button === 0) {
+      if (e.shiftKey || e.metaKey || e.ctrlKey) {
+        st.select(layer.id, "toggle")
         return
       }
+      if (!st.selected.includes(layer.id)) st.select(layer.id)
+      // Drag every selected unlocked node; positions are local to each parent.
+      const ids = useStore.getState().selected.filter((x) => {
+        const n = st.scene.layers.find((l) => l.id === x)
+        return n && !n.locked
+      })
+      const origins = new Map<string, [number, number]>()
+      for (const x of ids) {
+        const n = st.scene.layers.find((l) => l.id === x)!
+        origins.set(x, [n.x, n.y])
+      }
+      drag.current = { kind: "layer", ids, start: w, origins }
+      return
     }
     if (!id) st.select(null)
     drag.current = { kind: "pan", start: [e.clientX, e.clientY], origin: [...center.current] }
@@ -314,13 +325,21 @@ export function StudioCanvas() {
     const st = useStore.getState()
     const d = drag.current
     if (d?.kind === "layer") {
-      let x = d.origin[0] + w[0] - d.start[0],
-        y = d.origin[1] + w[1] - d.start[1]
-      if (st.snap && !e.altKey) {
-        x = snap(x, 0.25)
-        y = snap(y, 0.25)
-      }
-      st.updateLayer(d.id, { x, y }, "drag:" + d.id)
+      const patches = d.ids.map((id) => {
+        // World delta seen in the parent's coordinates.
+        const inv = xfInvert(parentXf(st.scene.layers, id))
+        const [ax, ay] = xfApply(inv, d.start[0], d.start[1])
+        const [bx, by] = xfApply(inv, w[0], w[1])
+        const o = d.origins.get(id)!
+        let x = o[0] + bx - ax,
+          y = o[1] + by - ay
+        if (st.snap && !e.altKey) {
+          x = snap(x, 0.25)
+          y = snap(y, 0.25)
+        }
+        return { id, patch: { x, y } }
+      })
+      st.updateLayers(patches, "drag:" + d.ids.join(","))
     } else if (d?.kind === "pan") {
       center.current = [
         d.origin[0] - (e.clientX - d.start[0]) / zoom.current,
@@ -376,7 +395,7 @@ export function StudioCanvas() {
 
   function onKeyDown(e: React.KeyboardEvent) {
     const st = useStore.getState()
-    const sel = st.scene.layers.find((l) => l.id === st.selected)
+    const sel = st.scene.layers.filter((l) => st.selected.includes(l.id) && !l.locked)
     const step = e.shiftKey ? 0.1 : 0.5
     const moves: Record<string, [number, number]> = {
       ArrowLeft: [-step, 0],
@@ -384,13 +403,21 @@ export function StudioCanvas() {
       ArrowUp: [0, step],
       ArrowDown: [0, -step],
     }
-    if (sel && moves[e.key]) {
+    if (sel.length && moves[e.key]) {
       e.preventDefault()
       const [dx, dy] = moves[e.key]
-      st.updateLayer(sel.id, { x: sel.x + dx, y: sel.y + dy }, "nudge:" + sel.id)
-    } else if (sel && (e.key === "Delete" || e.key === "Backspace")) {
+      st.updateLayers(
+        sel.map((n) => {
+          const inv = xfInvert(parentXf(st.scene.layers, n.id))
+          const [ax, ay] = xfApply(inv, 0, 0)
+          const [bx, by] = xfApply(inv, dx, dy)
+          return { id: n.id, patch: { x: n.x + bx - ax, y: n.y + by - ay } }
+        }),
+        "nudge:" + sel.map((n) => n.id).join(","),
+      )
+    } else if (sel.length && (e.key === "Delete" || e.key === "Backspace")) {
       e.preventDefault()
-      st.setScene((s) => ({ ...s, layers: s.layers.filter((l) => l.id !== sel.id) }))
+      st.setScene((s) => deleteNodes(s, sel.map((n) => n.id)))
       st.select(null)
     } else if (e.key === "Escape") st.select(null)
   }

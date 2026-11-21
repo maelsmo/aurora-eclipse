@@ -1,25 +1,29 @@
 // A frame is the fully resolved scene for one moment: compiled glyphs, world
-// transforms, colours, grouped into draw items in z-order. Both the GPU
-// packer and the CPU reference consume it.
+// transforms, colours and looks, grouped into draw items in z-order. Both the
+// GPU packer and the CPU reference consume it.
 import { resolveAxes } from "./axes"
 import { compileGlyph } from "./compile"
 import { combine, type Op } from "./operators"
 import { BIG, sdBox, sdGlyph, clamp } from "./sdf"
 import { CAP } from "./grid"
-import type { Alphabet, Box, CompiledGlyph } from "./types"
-import type { ColorMode, FillMode, Material, Scene, Warp } from "./scene"
+import type { Box, CompiledGlyph } from "./types"
+import type { Look, LookPatch, Material, Scene, Warp } from "./scene/types"
+import { identity, nodeXf, xfCompose, type Xf } from "./scene/tree"
+import { resolveGlyphSet, type Library } from "./alphabet/sets"
 
 export type RGB = [number, number, number]
 
 export type FrameLayer = {
-  /** Source layer id (picking, overlays). */
+  /** Source node id (picking, overlays). */
   id: string
   glyph: CompiledGlyph
+  /** World placement: p = (x, y) + scale · R · diag(mirror, 1) · (q − anchor). */
   x: number
   y: number
   cos: number
   sin: number
   scale: number
+  mirror: 1 | -1
   /** Anchor in glyph coordinates (rotation / scale centre). */
   ax: number
   ay: number
@@ -34,23 +38,16 @@ export type FrameLayer = {
   reach: number
 }
 
-/** How an item is drawn: the per-object part of the material. */
-export type FrameLook = {
-  fill: FillMode
-  line: number
-  spacing: number
-  rings: number
-  dot: number
-  colorMode: ColorMode
-}
+/** How an item is drawn: the resolved look. */
+export type FrameLook = Look
 
 /**
  * A draw item. A cluster folds its layers bottom-up with their operators
- * (the merged "eclipse" composition) and is drawn as one instance.
+ * (a merge group, or a single object) and is drawn as one instance.
  */
 export type FrameItem = {
   kind: "cluster"
-  /** Source node id. */
+  /** Source node id: the merge group or the object. */
   id: string
   layers: FrameLayer[]
   look: FrameLook
@@ -67,14 +64,20 @@ export type Frame = {
   margin: number
 }
 
-export const lookOf = (m: Material): FrameLook => ({
-  fill: m.fill,
-  line: m.line,
-  spacing: m.spacing,
-  rings: m.rings,
-  dot: m.dot,
-  colorMode: m.colorMode,
-})
+/** How far the scene material reaches beyond the shapes (corona, shadow). */
+export function materialReach(m: Material) {
+  let r = 0
+  if (m.glow > 0) r = Math.max(r, m.glowSize * 6)
+  if (m.shadow > 0) r = Math.max(r, Math.hypot(m.shadowX, m.shadowY) + m.shadowSoft + 0.5)
+  return r
+}
+
+/** How far a look draws beyond the shape (isolines, halftone). */
+export function lookMargin(l: Look) {
+  if (l.mode === "isolines") return l.rings * l.spacing + l.spacing
+  if (l.mode === "halftone") return l.dot * 2
+  return 0
+}
 
 /** Every layer of the frame, bottom-up. */
 export function frameLayers(f: Frame): FrameLayer[] {
@@ -86,31 +89,27 @@ export function hexToRgb(hex: string): RGB {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
 }
 
-export function makeFrameLayer(
-  id: string,
-  glyph: CompiledGlyph,
-  t: { x: number; y: number; scale: number; rotation: number; op: Op; k: number; gap: number; t: number; color: string },
-  margin: number,
-): FrameLayer {
-  const scale = Math.max(t.scale, 0.05)
-  const reach =
-    Math.max(t.k, Math.abs(t.gap), glyph.fillet, Math.abs(glyph.ink), glyph.attract) + 0.25 + margin / scale
-  const a = (t.rotation * Math.PI) / 180
+type LayerParams = { op: Op; k: number; gap: number; t: number; color: string }
+
+export function makeFrameLayer(id: string, glyph: CompiledGlyph, world: Xf, p: LayerParams, margin: number): FrameLayer {
+  const scale = Math.max(world.s, 0.05)
+  const reach = Math.max(p.k, Math.abs(p.gap), glyph.fillet, Math.abs(glyph.ink), glyph.attract) + 0.25 + margin / scale
   return {
     id,
     glyph,
-    x: t.x,
-    y: t.y,
-    cos: Math.cos(a),
-    sin: Math.sin(a),
+    x: world.x,
+    y: world.y,
+    cos: world.cos,
+    sin: world.sin,
     scale,
+    mirror: world.m,
     ax: (glyph.box.x0 + glyph.box.x1) / 2,
     ay: CAP / 2,
-    op: t.op,
-    k: t.k,
-    gap: t.gap,
-    t: t.t,
-    color: hexToRgb(t.color),
+    op: p.op,
+    k: p.k,
+    gap: p.gap,
+    t: p.t,
+    color: hexToRgb(p.color),
     box: {
       x0: glyph.box.x0 - reach,
       y0: glyph.box.y0 - reach,
@@ -121,25 +120,58 @@ export function makeFrameLayer(
   }
 }
 
+type Ctx = { xf: Xf; opacity: number; look: LookPatch; visible: boolean; merge: FrameItem | null }
+
+/**
+ * Resolves the scene tree for one moment. Groups compose their transforms,
+ * opacity and look patches downwards (scene ← set ← groups ← object); a merge
+ * group becomes one cluster item, every other object its own item.
+ */
 export function buildFrame(
   scene: Scene,
-  alphabet: Alphabet,
-  revision: number,
+  lib: Library,
   time: number,
   pointer: [number, number],
-  margin = 0,
+  margin = materialReach(scene.material),
 ): Frame {
-  const layers: FrameLayer[] = []
-  for (const l of scene.layers) {
-    if (!l.visible || !(l.char in alphabet)) continue
-    const axes = resolveAxes(scene.axes, l.axes)
-    const glyph = compileGlyph(l.char, alphabet, axes, revision)
-    layers.push(makeFrameLayer(l.id, glyph, l, margin))
+  const items: FrameItem[] = []
+  const root: Ctx = { xf: identity, opacity: 1, look: {}, visible: true, merge: null }
+  const stack: { id: string; ctx: Ctx }[] = []
+  for (const n of scene.layers) {
+    while (stack.length && stack[stack.length - 1].id !== n.parent) stack.pop()
+    const parent = stack.length ? stack[stack.length - 1].ctx : root
+    const visible = parent.visible && n.visible
+    if (n.type === "group") {
+      const ctx: Ctx = {
+        xf: xfCompose(parent.xf, nodeXf(n)),
+        opacity: parent.opacity * (n.opacity ?? 1),
+        look: n.look ? { ...parent.look, ...n.look } : parent.look,
+        visible,
+        merge: null,
+      }
+      if (visible && n.mode === "merge" && !parent.merge) {
+        const look = { ...scene.look, ...ctx.look }
+        ctx.merge = { kind: "cluster", id: n.id, layers: [], look, opacity: ctx.opacity }
+        items.push(ctx.merge)
+      }
+      stack.push({ id: n.id, ctx })
+      continue
+    }
+    if (!visible || n.type !== "letter") continue
+    const entry = resolveGlyphSet(lib, n.char, n.set, scene.set)
+    if (!entry) continue
+    const axes = resolveAxes(scene.axes, n.axes)
+    const glyph = compileGlyph(n.char, entry.alphabet, axes, entry.version)
+    const look: Look = { ...scene.look, ...entry.set.look, ...parent.look, ...n.look }
+    const color = n.look?.tint ?? parent.look.tint ?? n.color
+    const world = xfCompose(parent.xf, nodeXf(n))
+    const host = parent.merge
+    const m = Math.max(margin, lookMargin(host ? host.look : look))
+    const layer = makeFrameLayer(n.id, glyph, world, { op: n.op, k: n.k, gap: n.gap, t: n.t, color }, m)
+    if (host) host.layers.push(layer)
+    else items.push({ kind: "cluster", id: n.id, layers: [layer], look, opacity: parent.opacity * (n.opacity ?? 1) })
   }
-  const items: FrameItem[] = layers.length
-    ? [{ kind: "cluster", id: "root", layers, look: lookOf(scene.material), opacity: 1 }]
-    : []
-  return { items, warp: scene.warp, time, pointer, margin }
+  return { items: items.filter((it) => it.layers.length > 0), warp: scene.warp, time, pointer, margin }
 }
 
 /* ---------- portable noise (identical integer hash in GLSL) ---------- */
@@ -198,7 +230,7 @@ export function warpPoint(f: Frame, x: number, y: number): [number, number] {
 export function layerField(l: FrameLayer, wx: number, wy: number) {
   const dx = wx - l.x,
     dy = wy - l.y
-  const lx = (l.cos * dx + l.sin * dy) / l.scale + l.ax
+  const lx = (l.mirror * (l.cos * dx + l.sin * dy)) / l.scale + l.ax
   const ly = (-l.sin * dx + l.cos * dy) / l.scale + l.ay
   const b = sdBox(lx, ly, l.box)
   // Outside the expanded box: a continuous lower bound of the true distance.
@@ -287,6 +319,13 @@ export function nearestDistance(f: Frame, x: number, y: number) {
   return d
 }
 
+/** Glyph point → world point. */
+export function layerToWorld(l: FrameLayer, gx: number, gy: number): [number, number] {
+  const lx = (gx - l.ax) * l.scale * l.mirror,
+    ly = (gy - l.ay) * l.scale
+  return [l.x + l.cos * lx - l.sin * ly, l.y + l.sin * lx + l.cos * ly]
+}
+
 /** World bounds of one layer (transformed glyph box), before warps. */
 export function layerBounds(l: FrameLayer, pad = 0): Box {
   const b: Box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }
@@ -298,10 +337,7 @@ export function layerBounds(l: FrameLayer, pad = 0): Box {
     [g.x0 - ink, g.y1 + ink],
     [g.x1 + ink, g.y1 + ink],
   ]) {
-    const lx = (gx - l.ax) * l.scale,
-      ly = (gy - l.ay) * l.scale
-    const x = l.x + l.cos * lx - l.sin * ly,
-      y = l.y + l.sin * lx + l.cos * ly
+    const [x, y] = layerToWorld(l, gx, gy)
     b.x0 = Math.min(b.x0, x)
     b.y0 = Math.min(b.y0, y)
     b.x1 = Math.max(b.x1, x)

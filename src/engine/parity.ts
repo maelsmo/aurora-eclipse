@@ -4,8 +4,8 @@ import { rasterize } from "./cpu"
 import { frameBounds } from "./frame"
 import { fitView, sceneFrame } from "./view"
 import { presets } from "./presets"
-import { defaultMaterial, type Scene } from "./scene"
-import type { Alphabet } from "./types"
+import { defaultLook, defaultMaterial, type Scene } from "./scene"
+import type { Library } from "./alphabet/sets"
 
 export type ParityResult = { name: string; edge: number; flipped: number; maxDelta: number }
 
@@ -18,9 +18,9 @@ function pixels(canvas: HTMLCanvasElement, w: number, h: number) {
   return ctx.getImageData(0, 0, w, h).data
 }
 
-export function parityCheck(name: string, scene: Scene, alphabet: Alphabet, revision: number, w = 480, h = 300): ParityResult {
-  const s: Scene = { ...scene, material: { ...defaultMaterial, transparent: true }, warp: { ...scene.warp, flow: 0, wave: 0, pointer: 0 } }
-  const frame = sceneFrame(s, alphabet, revision, 0)
+export function parityCheck(name: string, scene: Scene, lib: Library, w = 480, h = 300): ParityResult {
+  const s: Scene = { ...scene, look: { ...defaultLook }, material: { ...defaultMaterial, transparent: true }, warp: { ...scene.warp, flow: 0, wave: 0, pointer: 0 } }
+  const frame = sceneFrame(s, lib, 0)
   const view = fitView(frameBounds(frame, 0.6), w, h, 0.05)
   const glCanvas = document.createElement("canvas")
   const r = new GlyphRenderer(glCanvas, { preserve: true })
@@ -48,6 +48,6 @@ export function parityCheck(name: string, scene: Scene, alphabet: Alphabet, revi
   return { name, edge, flipped, maxDelta: +maxDelta.toFixed(3) }
 }
 
-export function parityAll(alphabet: Alphabet, revision: number) {
-  return presets.map((p) => parityCheck(p.name, p.make(), alphabet, revision))
+export function parityAll(lib: Library) {
+  return presets.map((p) => parityCheck(p.name, p.make(), lib))
 }

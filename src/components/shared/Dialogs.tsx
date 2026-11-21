@@ -14,9 +14,10 @@ import { SceneThumb } from "./Thumbs"
 import { exportSVG, makeRecipe, recordCanvas, fileStem, vectorWarnings } from "@/engine/export"
 import { renderPNG } from "@/engine/gpu/thumbs"
 import { frameBounds } from "@/engine/frame"
-import { fitView, materialReach, sceneFrame } from "@/engine/view"
+import { fitView, sceneFrame, sceneReach } from "@/engine/view"
 import { download } from "@/engine/storage"
-import type { Scene } from "@/engine/scene"
+import type { Look, Scene } from "@/engine/scene"
+import { sceneChars } from "./labels"
 import { useStore } from "@/state/store"
 import { runtime } from "@/state/runtime"
 
@@ -25,7 +26,7 @@ export function SaveDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const save = useStore((s) => s.saveToCollection)
   const [name, setName] = useState("")
   useEffect(() => {
-    if (open) setName(scene.layers.map((l) => l.char).join("").slice(0, 24) || "Сочетание")
+    if (open) setName(sceneChars(scene.layers).slice(0, 24) || "Сочетание")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
   return (
@@ -65,14 +66,15 @@ export function SaveDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   )
 }
 
+/** Every look a scene can draw with (scene look plus object overrides). */
+const sceneLooks = (s: Scene): Look[] => [s.look, ...s.layers.filter((l) => l.look).map((l) => ({ ...s.look, ...l.look }))]
+
 type Format = "svg" | "png" | "video" | "json"
 const sizes = [1024, 2048, 4096].map((v) => ({ value: String(v), label: `${v} px` }))
 
 export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const alphabet = useStore((s) => s.alphabet)
-  const revision = useStore((s) => s.revision)
-  const versions = useStore((s) => s.versions)
-  const alphabetId = useStore((s) => s.alphabetId)
+  const library = useStore((s) => s.library)
+  const sets = useStore((s) => s.sets)
   const [format, setFormat] = useState<Format>("svg")
   const [size, setSize] = useState("2048")
   const [transparent, setTransparent] = useState(true)
@@ -91,7 +93,6 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   }, [open])
 
   const scene = frozen?.scene ?? useStore.getState().scene
-  const version = versions.find((v) => v.id === alphabetId)!
 
   async function run() {
     if (!frozen) return
@@ -100,22 +101,22 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       await new Promise((r) => setTimeout(r, 20))
       const stem = fileStem(frozen.scene)
       if (format === "svg") {
-        const frame = sceneFrame(frozen.scene, alphabet, revision, frozen.time)
+        const frame = sceneFrame(frozen.scene, library, frozen.time)
         const svg = await exportSVG(frame, frozen.scene.material, { transparent }, setProgress)
         setProgress(0)
         download(new Blob([svg], { type: "image/svg+xml" }), stem + ".svg")
       } else if (format === "png") {
-        const frame = sceneFrame(frozen.scene, alphabet, revision, frozen.time)
-        const b = frameBounds(frame, materialReach(frozen.scene.material) + 0.8)
+        const frame = sceneFrame(frozen.scene, library, frozen.time)
+        const b = frameBounds(frame, sceneReach(frozen.scene) + 0.8)
         const long = Number(size)
         const aspect = (b.x1 - b.x0) / Math.max(b.y1 - b.y0, 0.1)
         const w = aspect >= 1 ? long : Math.round(long * aspect),
           h = aspect >= 1 ? Math.round(long / aspect) : long
         const view = fitView(b, w, h, 0.02)
-        const blob = await renderPNG(frozen.scene, alphabet, revision, w, h, view, frozen.time, transparent)
+        const blob = await renderPNG(frozen.scene, library, w, h, view, frozen.time, transparent)
         download(blob, stem + ".png")
       } else if (format === "json") {
-        const recipe = makeRecipe(useStore.getState().scene, version.name, version.glyphs)
+        const recipe = makeRecipe(useStore.getState().scene, sets)
         download(new Blob([JSON.stringify(recipe, null, 2)], { type: "application/json" }), stem + ".json")
       } else {
         const canvas = document.querySelector<HTMLCanvasElement>("[data-studio-canvas]")
@@ -186,11 +187,11 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
           <ToggleGroupItem value="json" className="flex-1">JSON</ToggleGroupItem>
         </ToggleGroup>
         <p className="text-sm text-muted-foreground">{notes[format]}</p>
-        {format === "svg" && vectorWarnings(scene.material).length > 0 && (
+        {format === "svg" && vectorWarnings(scene.material, sceneLooks(scene)).length > 0 && (
           <Alert>
             <TriangleAlert />
             <AlertTitle>Не войдёт в вектор</AlertTitle>
-            <AlertDescription>{vectorWarnings(scene.material).join(", ")}. Для них используйте PNG.</AlertDescription>
+            <AlertDescription>{vectorWarnings(scene.material, sceneLooks(scene)).join(", ")}. Для них используйте PNG.</AlertDescription>
           </Alert>
         )}
         {(format === "svg" || format === "png") && (

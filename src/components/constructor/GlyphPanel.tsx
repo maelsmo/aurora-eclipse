@@ -16,7 +16,7 @@ import { glyphAdvance } from "@/engine/compile"
 import { layoutText, makeScene } from "@/engine/scene"
 import { download } from "@/engine/storage"
 import type { GlyphDef, PrimDef } from "@/engine/types"
-import { useStore } from "@/state/store"
+import { editingAlphabet, useStore } from "@/state/store"
 import { editTarget, primNames, withPrims } from "./editing"
 
 const sizeDef = { label: "Размер", min: 0.5, max: 2, step: 0.05 }
@@ -44,13 +44,13 @@ function validGlyphs(raw: unknown): Record<string, GlyphDef> | null {
 
 export function GlyphPanel({ selected, onSelect }: { selected: number | null; onSelect: (i: number | null) => void }) {
   const editing = useStore((s) => s.editing)
-  const alphabet = useStore((s) => s.alphabet)
-  const revision = useStore((s) => s.revision)
+  const alphabet = useStore(editingAlphabet)
+  const library = useStore((s) => s.library)
   const axes = useStore((s) => s.scene.axes)
-  const versions = useStore((s) => s.versions)
-  const alphabetId = useStore((s) => s.alphabetId)
+  const versions = useStore((s) => s.sets)
+  const alphabetId = useStore((s) => s.editingSet)
   const st = useStore.getState()
-  const version = versions.find((v) => v.id === alphabetId)!
+  const version = versions.find((v) => v.id === alphabetId) ?? versions[0]
   const { target, shared, def } = editTarget(editing, alphabet)
   const own = def?.prims ?? []
   const prim = selected !== null ? own[selected] : undefined
@@ -65,10 +65,11 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
     () =>
       makeScene({
         axes,
-        layers: layoutText(`H${editing}HO${editing}O`, alphabet, axes, 0.5, { color: "#161616" }, revision),
+        set: alphabetId,
+        layers: layoutText(`H${editing}HO${editing}O`, alphabet, axes, 0.5, { color: "#161616" }, library.sets[alphabetId]?.version ?? 0),
         material: { ...makeScene().material, transparent: true },
       }),
-    [editing, alphabet, axes, revision],
+    [editing, alphabet, axes, library, alphabetId],
   )
 
   const setPrim = (p: PrimDef, key: string) => {
@@ -90,7 +91,7 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
       const data = JSON.parse(await file.text())
       const glyphs = validGlyphs(data?.glyphs)
       if (!glyphs) throw new Error()
-      st.addVersion(typeof data.name === "string" ? data.name.slice(0, 40) : file.name, glyphs)
+      st.addSet(typeof data.name === "string" ? data.name.slice(0, 40) : file.name, { glyphs })
       toast.success(`Алфавит «${data.name ?? file.name}» загружен: ${Object.keys(glyphs).length} изменённых знаков`)
     } catch {
       toast.error("Файл не похож на алфавит Aurora Eclipse. Нужен JSON, выгруженный из конструктора.")
@@ -221,7 +222,7 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
           <Select
             items={versions.map((v) => ({ value: v.id, label: v.name }))}
             value={alphabetId}
-            onValueChange={(v) => v && st.setAlphabetVersion(v)}
+            onValueChange={(v) => v && st.setEditingSet(v)}
           >
             <SelectTrigger className="w-full" aria-label="Версия алфавита">
               <SelectValue />
@@ -235,7 +236,7 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
             </SelectContent>
           </Select>
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" onClick={() => st.addVersion(version.name + " — копия")}>
+            <Button variant="outline" size="sm" onClick={() => st.addSet(version.name + " — копия", { from: version.id })}>
               <Copy data-icon="inline-start" />
               Дублировать
             </Button>
@@ -285,7 +286,7 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
             onSubmit={(e) => {
               e.preventDefault()
               if (!name.trim()) return
-              st.renameVersion(alphabetId, name.trim().slice(0, 40))
+              st.renameSet(alphabetId, name.trim().slice(0, 40))
               setRenaming(false)
             }}
           >
@@ -318,7 +319,7 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
             <Button
               variant="destructive"
               onClick={() => {
-                st.deleteVersion(alphabetId)
+                st.deleteSet(alphabetId)
                 setConfirmDelete(false)
               }}
             >

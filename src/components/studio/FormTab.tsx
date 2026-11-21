@@ -12,6 +12,7 @@ import { Section, Hint } from "@/components/shared/Section"
 import { axisKeys, defaultAxes, type AxisKey } from "@/engine/axes"
 import { axisParams, layerParams, layerTarget, type LayerNumKey } from "@/engine/params"
 import { selectedLayer, useStore } from "@/state/store"
+import { nodeLabel } from "@/components/shared/labels"
 
 const transformKeys: LayerNumKey[] = ["x", "y", "scale", "rotation"]
 
@@ -20,7 +21,8 @@ export function FormTab() {
   const layer = useStore(selectedLayer)
   const { setScene, updateLayer } = useStore.getState()
   const [picking, setPicking] = useState(false)
-  const own = !!layer?.axes
+  const letter = layer?.type === "letter" ? layer : null
+  const own = !!letter?.axes
 
   const setAxis = (k: AxisKey, v: number) =>
     setScene((s) => ({ ...s, axes: { ...s.axes, [k]: v } }), "axes." + k)
@@ -28,17 +30,18 @@ export function FormTab() {
   return (
     <>
       {layer ? (
-        <Section title={`Слой ${layer.char}`}>
-          <div className="flex items-center gap-2">
+        <Section title={nodeLabel(layer)}>
+          {letter && <div className="flex items-center gap-2">
             <Popover open={picking} onOpenChange={setPicking}>
               <PopoverTrigger
-                render={<Button variant="outline" className="h-12 w-12 p-1" aria-label={"Буква " + layer.char + ", заменить"} />}
+                render={<Button variant="outline" className="h-12 w-12 p-1" aria-label={"Буква " + letter.char + ", заменить"} />}
               >
-                <GlyphThumb char={layer.char} color={layer.color} />
+                <GlyphThumb char={letter.char} set={letter.set} color={letter.color} />
               </PopoverTrigger>
               <PopoverContent className="w-80" align="start">
                 <GlyphPicker
-                  value={layer.char}
+                  value={letter.char}
+                  set={letter.set}
                   onPick={(c) => {
                     updateLayer(layer.id, { char: c })
                     setPicking(false)
@@ -55,17 +58,17 @@ export function FormTab() {
                 onChange={(c) => updateLayer(layer.id, { color: c }, "color:" + layer.id)}
               />
             </div>
-          </div>
+          </div>}
           {transformKeys.map((k) => (
             <ParamSlider
               key={k}
               def={layerParams[k]}
-              value={layer[k]}
+              value={layer[k] ?? 1}
               target={layerTarget(layer.id, k)}
               onChange={(v) => updateLayer(layer.id, { [k]: v }, k + ":" + layer.id)}
             />
           ))}
-          <div className="flex items-center justify-between gap-2">
+          {letter && <div className="flex items-center justify-between gap-2">
             <Label htmlFor="own-axes" className="text-sm font-normal">
               Свои оси у слоя
             </Label>
@@ -74,14 +77,14 @@ export function FormTab() {
               checked={own}
               onCheckedChange={(v) => updateLayer(layer.id, { axes: v ? { weight: axes.weight } : undefined })}
             />
-          </div>
-          {own &&
+          </div>}
+          {letter && own &&
             axisKeys.map((k) => (
               <ParamSlider
                 key={k}
                 def={axisParams[k]}
-                value={layer.axes?.[k] ?? axes[k]}
-                onChange={(v) => updateLayer(layer.id, { axes: { ...layer.axes, [k]: v } }, "laxes." + k + layer.id)}
+                value={letter.axes?.[k] ?? axes[k]}
+                onChange={(v) => updateLayer(layer.id, { axes: { ...letter.axes, [k]: v } }, "laxes." + k + layer.id)}
               />
             ))}
         </Section>

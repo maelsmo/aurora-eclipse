@@ -266,23 +266,36 @@ export function compilePrims(prims: PrimDef[], axes: Axes): CompiledGlyph {
   }
 }
 
+/** LRU cache of compiled glyphs; clones with quantised axes stay well inside it. */
+const CACHE_SIZE = 4096
 const cache = new Map<string, CompiledGlyph>()
 
-/** Compiles a glyph from an alphabet, cached by content. */
+/**
+ * Compiles a glyph from an alphabet, cached by content. `version` identifies
+ * the alphabet edition (set id and revision).
+ */
 export function compileGlyph(
   char: string,
   alphabet: Alphabet,
   axes: Axes,
-  revision = 0,
+  version: string | number = 0,
 ): CompiledGlyph {
-  const key = char + "|" + revision + "|" + JSON.stringify(axes)
+  const key = version + "|" + char + "|" + axesKey(axes)
   const hit = cache.get(key)
-  if (hit) return hit
+  if (hit) {
+    cache.delete(key)
+    cache.set(key, hit)
+    return hit
+  }
   const prims = glyphPrims(char, alphabet) ?? []
   const g = compilePrims(prims, axes)
-  if (cache.size > 800) cache.clear()
+  if (cache.size >= CACHE_SIZE) cache.delete(cache.keys().next().value!)
   cache.set(key, g)
   return g
+}
+
+function axesKey(a: Axes) {
+  return `${a.weight},${a.contrast},${a.width},${a.fillet},${a.overshoot},${a.terminal},${a.counter},${a.satellite},${a.attract},${a.ink},${a.slant}`
 }
 
 export function clearCompileCache() {

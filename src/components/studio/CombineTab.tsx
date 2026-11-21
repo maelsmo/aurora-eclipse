@@ -4,11 +4,14 @@ import { opIcons } from "@/components/shared/icons"
 import { opInfo, ops } from "@/engine/operators"
 import { layerParams, layerTarget } from "@/engine/params"
 import { selectedLayer, useStore } from "@/state/store"
+import { mergeParent } from "@/engine/scene"
+import { nodeLabel } from "@/components/shared/labels"
 import { cn } from "@/lib/utils"
 
 export function CombineTab() {
   const layer = useStore(selectedLayer)
-  const isBase = useStore((s) => s.scene.layers[0]?.id === s.selected)
+  const host = useStore((s) => (layer ? mergeParent(s.scene.layers, layer.id) : null))
+  const isBase = useStore((s) => !!host && s.scene.layers.find((l) => l.parent === host.id)?.id === layer?.id)
   const updateLayer = useStore((s) => s.updateLayer)
 
   if (!layer)
@@ -20,16 +23,25 @@ export function CombineTab() {
         </Hint>
       </Section>
     )
+  if (!host)
+    return (
+      <Section title={nodeLabel(layer)}>
+        <Hint>
+          Операторы действуют внутри сплава. Выделите буквы и объедините их в сплав в панели слоёв — тогда они начнут
+          сливаться, затмевать и вырезать друг друга.
+        </Hint>
+      </Section>
+    )
   if (isBase)
     return (
-      <Section title={`Слой ${layer.char}`}>
+      <Section title={nodeLabel(layer)}>
         <Hint>Нижний слой — основа сочетания. Оператор задаётся у слоёв над ним.</Hint>
       </Section>
     )
 
   return (
     <>
-      <Section title={`Слой ${layer.char}: оператор`}>
+      <Section title={`${nodeLabel(layer)}: оператор`}>
         <div role="radiogroup" aria-label="Оператор сочетания" className="grid grid-cols-2 gap-1.5">
           {ops.map((o) => {
             const I = opIcons[o]

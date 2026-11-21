@@ -156,12 +156,13 @@ vec2 warp(vec2 p) {
  */
 export const fold = `
 float layerField(int i, vec2 w) {
-  vec4 L1 = lay(i, 1), L2 = lay(i, 2), L6 = lay(i, 6);
+  vec4 L0 = lay(i, 0), L1 = lay(i, 1), L2 = lay(i, 2), L6 = lay(i, 6);
   vec2 d = w - L1.xy;
-  vec2 lp = vec2(L1.z * d.x + L1.w * d.y, -L1.w * d.x + L1.z * d.y) / L2.x + L2.yz;
+  vec2 lp = vec2(L1.z * d.x + L1.w * d.y, -L1.w * d.x + L1.z * d.y) / L2.x;
+  lp.x *= L0.w; // mirror
+  lp += L2.yz;
   float b = sdBox(lp, L6);
   if (b > 0.0) return (b + lay(i, 7).x) * L2.x;
-  vec4 L0 = lay(i, 0);
   return glyphField(int(L0.x + 0.5), int(L0.y + 0.5), lp, lay(i, 3), L2.w) * L2.x;
 }
 

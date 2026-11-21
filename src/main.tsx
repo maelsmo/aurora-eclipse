@@ -12,7 +12,7 @@ if (import.meta.env.DEV) {
   if (new URLSearchParams(location.search).get("debug") === "parity")
     import("./engine/parity").then(({ parityAll }) => {
       const st = useStore.getState()
-      const rows = parityAll(st.alphabet, st.revision)
+      const rows = parityAll(st.library)
       console.table(rows)
       const pre = document.createElement("pre")
       pre.className = "fixed right-3 bottom-3 z-50 max-w-md rounded-lg border bg-background p-3 text-xs shadow-lg"

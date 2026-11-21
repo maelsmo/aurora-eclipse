@@ -3,7 +3,7 @@
 // halftone is circles.
 import { frameBounds, sampleItem, warpReach, type Frame, type FrameItem, type RGB } from "../frame"
 import { clamp } from "../sdf"
-import type { Material } from "../scene"
+import type { Look, Material } from "../scene/types"
 import type { Box, Vec } from "../types"
 import { buildRegions, foldFronts, itemBounds, regionField, type Region } from "./regions"
 import { contoursToPath, traceField, traceLevels, type Field, type TraceOptions } from "./trace"
@@ -20,14 +20,14 @@ export const hex = (c: readonly number[]) =>
   "#" + c.map((v) => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, "0")).join("")
 
 /** Material features that a vector file cannot carry. */
-export function vectorWarnings(m: Material): string[] {
+export function vectorWarnings(m: Material, looks: Look[]): string[] {
   const out: string[] = []
   if (m.glow > 0) out.push("корона")
   if (m.shadow > 0) out.push("тень")
   if (m.grain > 0) out.push("зерно")
-  if (m.colorMode === "aurora") out.push("аврора (цвета слоёв вместо неё)")
-  if (m.colorMode === "depth") out.push("градиент глубины (цвета слоёв вместо него)")
-  if (m.overlap > 0 && m.fill !== "fill") out.push("полутень в линейных режимах")
+  if (looks.some((l) => l.colorMode === "aurora")) out.push("аврора (цвета слоёв вместо неё)")
+  if (looks.some((l) => l.colorMode === "depth")) out.push("градиент глубины (цвета слоёв вместо него)")
+  if (m.overlap > 0 && looks.some((l) => l.mode !== "fill")) out.push("полутень в линейных режимах")
   return out
 }
 
@@ -40,7 +40,7 @@ const intersect = (a: Box, b: Box): Box => ({
 
 function lookReach(it: FrameItem) {
   const l = it.look
-  return l.fill === "isolines" ? l.rings * l.spacing + l.spacing : l.fill === "outline" ? l.line : l.fill === "halftone" ? l.dot * 1.3 : 0
+  return l.mode === "isolines" ? l.rings * l.spacing + l.spacing : l.mode === "outline" ? l.line : l.mode === "halftone" ? l.dot * 1.3 : 0
 }
 
 function frontField(f: Frame, it: FrameItem, r: Region): Field | null {
@@ -83,7 +83,7 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
     const d0: Field = (x, y) => foldFronts(frame, it, x, y)
     const fuse = Math.max(0, ...it.layers.map((l) => (l.op === "fuse" ? l.k * 0.3 : 0)))
     const ibox = itemBounds(it, 0.6 + lookReach(it) + wr + fuse)
-    if (look.fill === "fill") {
+    if (look.mode === "fill" || look.mode === "lines") {
       for (const r of regions) {
         const d = path(regionField(frame, it, r), r.box)
         tick()
@@ -97,14 +97,14 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
         tick()
         if (d) parts.push(`<path d="${d}" fill="${m.overlapColor}" fill-opacity="${m.overlap.toFixed(3)}"/>`)
       }
-    } else if (look.fill === "outline" || look.fill === "isolines") {
+    } else if (look.mode === "outline" || look.mode === "isolines") {
       // Centre lines of the strokes, traced from one sampling of the field.
       const sp = Math.max(look.spacing, 0.02)
       const n = Math.max(1, Math.round(look.rings))
-      const levels = look.fill === "outline" ? [0] : Array.from({ length: 2 * n + 1 }, (_, k) => (k - n) * sp)
+      const levels = look.mode === "outline" ? [0] : Array.from({ length: 2 * n + 1 }, (_, k) => (k - n) * sp)
       const traced = traceLevels(d0, intersect(ibox, box), levels, opts.trace)
       const lines = traced
-        .map((cs, k) => ({ d: contoursToPath(cs, map), opacity: look.fill === "isolines" && Math.abs(k - n) === n ? 0.5 : 1 }))
+        .map((cs, k) => ({ d: contoursToPath(cs, map), opacity: look.mode === "isolines" && Math.abs(k - n) === n ? 0.5 : 1 }))
         .filter((l) => l.d)
       tick()
       const linesId = `${uidPrefix}lines-${ii}`

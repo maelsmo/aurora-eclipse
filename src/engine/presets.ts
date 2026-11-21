@@ -2,11 +2,15 @@
 import { defaultAlphabet } from "./alphabet"
 import { defaultAxes } from "./axes"
 import {
+  defaultLook,
   defaultMaterial,
+  isLeaf,
   layoutText,
   makeLayer,
-  makeScene,
+  mergeScene,
   uid,
+  type LetterNode,
+  type Look,
   type Material,
   type Scene,
 } from "./scene"
@@ -15,6 +19,7 @@ export type Context = {
   id: string
   name: string
   material: Partial<Material>
+  look?: Partial<Look>
   palette: string[]
 }
 
@@ -44,12 +49,12 @@ export const contexts: Context[] = [
     material: {
       ...defaultMaterial,
       background: "#07090F",
-      colorMode: "aurora",
       aurora: ["#7CF5C8", "#6C5CE7", "#FF6FB5"],
       glow: 0.35,
       glowSize: 1.4,
       glowColor: "#6C5CE7",
     },
+    look: { colorMode: "aurora" },
     palette: ["#7CF5C8", "#6C5CE7", "#FF6FB5"],
   },
   {
@@ -77,35 +82,34 @@ export const contexts: Context[] = [
   {
     id: "rings",
     name: "Изолинии",
-    material: {
-      ...defaultMaterial,
-      fill: "isolines",
-      line: 0.07,
-      spacing: 0.3,
-      rings: 8,
-      background: "#F4F1EA",
-    },
+    material: { ...defaultMaterial, background: "#F4F1EA" },
+    look: { mode: "isolines", line: 0.07, spacing: 0.3, rings: 8 },
     palette: ["#161616", "#F2542D", "#5B3CF5"],
   },
   {
     id: "plotter",
     name: "Плоттер",
-    material: { ...defaultMaterial, fill: "outline", line: 0.06, background: "#FFFFFF" },
+    material: { ...defaultMaterial, background: "#FFFFFF" },
+    look: { mode: "outline", line: 0.06 },
     palette: ["#1A1A1A", "#1A1A1A", "#1A1A1A"],
   },
   {
     id: "halftone",
     name: "Полутон",
-    material: { ...defaultMaterial, fill: "halftone", dot: 0.26, background: "#F4F1EA" },
+    material: { ...defaultMaterial, background: "#F4F1EA" },
+    look: { mode: "halftone", dot: 0.26 },
     palette: ["#161616", "#2F80ED", "#F2542D"],
   },
 ]
 
+/** Applies a context: scene material and look, and the palette over the objects in order. */
 export function applyContext(scene: Scene, ctx: Context): Scene {
+  let i = 0
   return {
     ...scene,
     material: { ...defaultMaterial, ...ctx.material },
-    layers: scene.layers.map((l, i) => ({ ...l, color: ctx.palette[i % ctx.palette.length] })),
+    look: { ...defaultLook, ...ctx.look },
+    layers: scene.layers.map((l) => (isLeaf(l) ? { ...l, color: ctx.palette[i++ % ctx.palette.length] } : l)),
   }
 }
 
@@ -114,9 +118,9 @@ export type Preset = { id: string; name: string; make: () => Scene }
 const pair = (
   a: string,
   b: string,
-  op: Scene["layers"][number]["op"],
+  op: LetterNode["op"],
   dx: number,
-  over: Partial<Scene["layers"][number]> = {},
+  over: Partial<LetterNode> = {},
 ) => [
   makeLayer(a, { x: -dx / 2 }),
   makeLayer(b, { x: dx / 2, op, ...over }),
@@ -127,46 +131,36 @@ export const presets: Preset[] = [
     id: "eclipse-ae",
     name: "Затмение AE",
     make: () =>
-      makeScene({ layers: pair("A", "E", "eclipse", 3.5, { gap: 0.18, color: "#161616" }) }),
+      mergeScene(pair("A", "E", "eclipse", 3.5, { gap: 0.18, color: "#161616" })),
   },
   {
     id: "fuse",
     name: "Слияние",
     make: () =>
-      makeScene({
-        axes: { ...defaultAxes, fillet: 0.4 },
-        layers: pair("O", "S", "fuse", 3.4, { k: 0.9, color: "#5B3CF5" }).map((l, i) =>
-          i === 0 ? { ...l, color: "#161616" } : l,
-        ),
-      }),
+      mergeScene(
+        pair("O", "S", "fuse", 3.4, { k: 0.9, color: "#5B3CF5" }).map((l, i) => (i === 0 ? { ...l, color: "#161616" } : l)),
+        { axes: { ...defaultAxes, fillet: 0.4 } },
+      ),
   },
   {
     id: "inlay",
     name: "Врезка",
     make: () => {
-      const s = makeScene({ layers: pair("R", "X", "inlay", 2.4, { gap: 0.2, color: "#F2542D" }) })
-      return s
+      return mergeScene(pair("R", "X", "inlay", 2.4, { gap: 0.2, color: "#F2542D" }))
     },
   },
   {
     id: "cut",
     name: "Вырезание",
     make: () =>
-      makeScene({
-        layers: [
-          makeLayer("Ж", { scale: 1.3 }),
-          makeLayer("O", { op: "cut", gap: 0.15, k: 0.2, scale: 0.7 }),
-        ],
-      }),
+      mergeScene([makeLayer("Ж", { scale: 1.3 }), makeLayer("O", { op: "cut", gap: 0.15, k: 0.2, scale: 0.7 })]),
   },
   {
     id: "morph",
     name: "Перетекание A→E",
     make: () => {
-      const s = makeScene({
-        layers: [makeLayer("A"), makeLayer("E", { op: "morph", t: 0.5, color: "#5B3CF5" })],
-      })
-      s.routes = [{ id: uid(), source: "lfo1", target: `layer:${s.layers[1].id}.t`, amount: 0.5 }]
+      const s = mergeScene([makeLayer("A"), makeLayer("E", { op: "morph", t: 0.5, color: "#5B3CF5" })])
+      s.routes = [{ id: uid(), source: "lfo1", target: `layer:${s.layers[2].id}.t`, amount: 0.5 }]
       return s
     },
   },
@@ -174,19 +168,16 @@ export const presets: Preset[] = [
     id: "orbit",
     name: "Орбита",
     make: () => {
-      const s = makeScene({
-        layers: [
-          makeLayer("O", { color: "#161616" }),
-          makeLayer("O", {
-            x: 3.2,
-            op: "xor",
-            k: 0.1,
-            color: "#161616",
-            motion: { type: "orbit", amount: 0.25, speed: 0.12, phase: 0 },
-          }),
-        ],
-      })
-      return s
+      return mergeScene([
+        makeLayer("O", { color: "#161616" }),
+        makeLayer("O", {
+          x: 3.2,
+          op: "xor",
+          k: 0.1,
+          color: "#161616",
+          motion: { type: "orbit", amount: 0.25, speed: 0.12, phase: 0 },
+        }),
+      ])
     },
   },
   {
@@ -198,7 +189,7 @@ export const presets: Preset[] = [
         op: "fuse",
         k: 0.35,
       })
-      return makeScene({ axes, layers, tracking: 0.15 })
+      return mergeScene(layers, { axes, tracking: 0.15 })
     },
   },
 ]

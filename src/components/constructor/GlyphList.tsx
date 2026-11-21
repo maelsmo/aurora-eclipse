@@ -1,15 +1,16 @@
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { GlyphThumb } from "@/components/shared/Thumbs"
 import { cyrillicOrder, latinOrder, sharedWith } from "@/engine/alphabet"
-import { useStore } from "@/state/store"
+import { editingAlphabet, useStore } from "@/state/store"
 import { cn } from "@/lib/utils"
 
 const EMPTY = {}
 
 export function GlyphList() {
   const editing = useStore((s) => s.editing)
-  const alphabet = useStore((s) => s.alphabet)
-  const overrides = useStore((s) => s.versions.find((v) => v.id === s.alphabetId)?.glyphs ?? EMPTY)
+  const alphabet = useStore(editingAlphabet)
+  const editingSet = useStore((s) => s.editingSet)
+  const overrides = useStore((s) => s.sets.find((v) => v.id === s.editingSet)?.glyphs ?? EMPTY)
   const setEditing = useStore((s) => s.setEditing)
 
   const group = (title: string, chars: string) => (
@@ -32,7 +33,7 @@ export function GlyphList() {
                 active && "border-primary bg-muted",
               )}
             >
-              <GlyphThumb char={c} className="pointer-events-none" />
+              <GlyphThumb char={c} set={editingSet} className="pointer-events-none" />
               <span className="absolute bottom-0.5 left-1 text-[10px] text-muted-foreground">{c}</span>
               {shared && <span className="absolute top-0.5 right-1 text-[10px] text-muted-foreground">={shared}</span>}
               {changed && <span aria-hidden className="absolute top-1 left-1 size-1.5 rounded-full bg-primary" />}

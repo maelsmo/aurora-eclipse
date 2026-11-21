@@ -6,12 +6,13 @@ import { ColorInput } from "@/components/shared/ColorInput"
 import { Section } from "@/components/shared/Section"
 import { SceneThumb } from "@/components/shared/Thumbs"
 import { contexts, applyContext } from "@/engine/presets"
-import { materialParams, type MaterialNumKey } from "@/engine/params"
-import type { ColorMode, FillMode, Material } from "@/engine/scene"
+import { lookParams, materialParams, type LookNumKey, type MaterialNumKey } from "@/engine/params"
+import { isLeaf, type ColorMode, type Look, type LookMode, type Material } from "@/engine/scene"
+import { nodeLabel } from "@/components/shared/labels"
 import { useStore } from "@/state/store"
 import { cn } from "@/lib/utils"
 
-const fills: { value: FillMode; label: string }[] = [
+const fills: { value: LookMode; label: string }[] = [
   { value: "fill", label: "Заливка" },
   { value: "outline", label: "Контур" },
   { value: "isolines", label: "Изолинии" },
@@ -22,9 +23,10 @@ const colorModes: { value: ColorMode; label: string }[] = [
   { value: "aurora", label: "Аврора" },
   { value: "depth", label: "Глубина" },
 ]
-const fillParams: Record<FillMode, MaterialNumKey[]> = {
+const fillParams: Record<LookMode, LookNumKey[]> = {
   fill: [],
   outline: ["line"],
+  lines: ["stripes", "stripeFill"],
   isolines: ["line", "spacing", "rings"],
   halftone: ["dot"],
 }
@@ -35,6 +37,11 @@ export function MaterialTab() {
   const { setScene, updateLayer } = useStore.getState()
   const setM = (patch: Partial<Material>, key?: string) =>
     setScene((s) => ({ ...s, material: { ...s.material, ...patch } }), key)
+  const look = scene.look
+  const setL = (patch: Partial<Look>, key?: string) => setScene((s) => ({ ...s, look: { ...s.look, ...patch } }), key)
+  const lookSlider = (k: LookNumKey) => (
+    <ParamSlider key={k} def={lookParams[k]} value={look[k]} target={"look." + k} onChange={(v) => setL({ [k]: v }, "look." + k)} />
+  )
   const slider = (k: MaterialNumKey) => (
     <ParamSlider key={k} def={materialParams[k]!} value={m[k]} target={"material." + k} onChange={(v) => setM({ [k]: v }, "material." + k)} />
   )
@@ -67,8 +74,8 @@ export function MaterialTab() {
           variant="outline"
           size="sm"
           spacing={0}
-          value={[m.fill]}
-          onValueChange={(v) => v[0] && setM({ fill: v[0] as FillMode })}
+          value={[look.mode]}
+          onValueChange={(v) => v[0] && setL({ mode: v[0] as LookMode })}
           className="w-full"
           aria-label="Способ отрисовки"
         >
@@ -78,7 +85,7 @@ export function MaterialTab() {
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
-        {fillParams[m.fill].map(slider)}
+        {fillParams[look.mode].map(lookSlider)}
       </Section>
 
       <Section title="Цвет">
@@ -86,8 +93,8 @@ export function MaterialTab() {
           variant="outline"
           size="sm"
           spacing={0}
-          value={[m.colorMode]}
-          onValueChange={(v) => v[0] && setM({ colorMode: v[0] as ColorMode })}
+          value={[look.colorMode]}
+          onValueChange={(v) => v[0] && setL({ colorMode: v[0] as ColorMode })}
           className="w-full"
           aria-label="Источник цвета"
         >
@@ -97,17 +104,17 @@ export function MaterialTab() {
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
-        {m.colorMode === "layer" && (
+        {look.colorMode === "layer" && (
           <div className="flex flex-wrap gap-1.5">
-            {scene.layers.map((l) => (
+            {scene.layers.filter(isLeaf).map((l) => (
               <div key={l.id} className="flex items-center gap-1 rounded-lg border py-0.5 pr-0.5 pl-2 text-xs">
-                {l.char}
-                <ColorInput value={l.color} label={"Цвет слоя " + l.char} className="h-7 w-7 border-0" onChange={(c) => updateLayer(l.id, { color: c }, "color:" + l.id)} />
+                {nodeLabel(l)}
+                <ColorInput value={l.color} label={"Цвет слоя " + nodeLabel(l)} className="h-7 w-7 border-0" onChange={(c) => updateLayer(l.id, { color: c }, "color:" + l.id)} />
               </div>
             ))}
           </div>
         )}
-        {m.colorMode === "aurora" && (
+        {look.colorMode === "aurora" && (
           <>
             <div className="flex gap-1.5">
               {m.aurora.map((c, i) => (
@@ -127,7 +134,7 @@ export function MaterialTab() {
             {slider("auroraSpeed")}
           </>
         )}
-        {m.colorMode === "depth" && (
+        {look.colorMode === "depth" && (
           <>
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground/80">Цвет глубины</span>

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 import { drawScene, type ThumbOptions } from "@/engine/gpu/thumbs"
-import { makeLayer, makeScene, type Scene } from "@/engine/scene"
+import { defaultLook, makeLayer, makeScene, type LookPatch, type Scene } from "@/engine/scene"
 import type { Axes } from "@/engine/axes"
 import { useStore } from "@/state/store"
 import { cn } from "@/lib/utils"
@@ -37,11 +37,10 @@ export function SceneThumb({
   options?: ThumbOptions
   label?: string
 }) {
-  const alphabet = useStore((s) => s.alphabet)
-  const revision = useStore((s) => s.revision)
+  const library = useStore((s) => s.library)
   const ref = useCanvasDraw(
-    (c) => drawScene(c, scene, alphabet, revision, options),
-    [scene, alphabet, revision, JSON.stringify(options ?? {})],
+    (c) => drawScene(c, scene, library, options),
+    [scene, library, JSON.stringify(options ?? {})],
   )
   return <canvas ref={ref} role="img" aria-label={label} className={cn("block size-full", className)} />
 }
@@ -51,21 +50,29 @@ const glyphScenes = new Map<string, Scene>()
 export function GlyphThumb({
   char,
   axes,
+  set,
+  look,
   color = "#161616",
   className,
 }: {
   char: string
   axes?: Axes
+  /** Glyph set; defaults to the scene set. */
+  set?: string
+  look?: LookPatch
   color?: string
   className?: string
 }) {
   const globalAxes = useStore((s) => s.scene.axes)
+  const sceneSet = useStore((s) => s.scene.set)
   const ax = axes ?? globalAxes
-  const key = char + color + JSON.stringify(ax)
+  const key = char + color + (set ?? sceneSet) + JSON.stringify(ax) + JSON.stringify(look ?? {})
   let scene = glyphScenes.get(key)
   if (!scene) {
     scene = makeScene({
       axes: ax,
+      set: set ?? sceneSet,
+      look: { ...defaultLook, ...look },
       layers: [makeLayer(char, { color })],
       material: { ...makeScene().material, transparent: true },
     })
