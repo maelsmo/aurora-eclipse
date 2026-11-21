@@ -1,22 +1,10 @@
 // Scene actions on the current selection, shared by the layer tree, its
 // context menu, the canvas and keyboard shortcuts.
 import { toast } from "sonner"
-import {
-  childrenOf,
-  deleteNodes,
-  duplicateNodes,
-  groupNodes,
-  isDescendant,
-  isGroup,
-  isLeaf,
-  LIMITS,
-  moveNode,
-  ungroup,
-  type GroupMode,
-  type Layer,
-  type Scene,
-} from "@/engine/scene"
+import { childrenOf, deleteNodes, duplicateNodes, groupNodes, isDescendant, isGroup, isLeaf, LIMITS, moveNode, ungroup, type GroupMode, type Layer, type Scene, ancestors, defaultCloner } from "@/engine/scene"
 import { selectedIds, useStore } from "@/state/store"
+import { runtime } from "@/state/runtime"
+import { layerBounds } from "@/engine/frame"
 
 const st = () => useStore.getState()
 
@@ -151,4 +139,74 @@ export function nodeRole(scene: Scene, n: Layer): "base" | "operand" | "free" {
   const p = n.parent ? scene.layers.find((l) => l.id === n.parent) : undefined
   if (!isGroup(p) || p.mode !== "merge") return "free"
   return childrenOf(scene.layers, p.id)[0]?.id === n.id ? "base" : "operand"
+}
+
+/**
+ * Wraps the selection into a new cloner group (a stack group with a grid
+ * cloner). The objects keep their places as offsets inside the layout.
+ */
+export function clonerFromSelection() {
+  const s = st()
+  const ids = selectionRoots(s.scene, selectedIds(s))
+  if (!ids.length) return
+  // A single group that is not a merge becomes a cloner itself.
+  const only = ids.length === 1 ? s.scene.layers.find((l) => l.id === ids[0]) : undefined
+  if (isGroup(only) && only.mode === "stack") {
+    s.updateLayer(only.id, { cloner: { ...(only.cloner ?? defaultCloner), enabled: true } })
+    return
+  }
+  // The layout step follows the size of what is cloned (as drawn now), plus a slot of air.
+  const frame = runtime.frame
+  let w = 2.5,
+    h = 2.5
+  if (frame) {
+    const inside = (lid: string) => ids.some((r) => r === lid || isDescendant(s.scene.layers, s.scene.layers.find((l) => l.id === lid)!, r))
+    let x0 = Infinity,
+      y0 = Infinity,
+      x1 = -Infinity,
+      y1 = -Infinity
+    for (const it of frame.items)
+      for (const l of it.layers) {
+        if (!s.scene.layers.some((n) => n.id === l.id) || !inside(l.id)) continue
+        const b = layerBounds(l)
+        x0 = Math.min(x0, b.x0)
+        y0 = Math.min(y0, b.y0)
+        x1 = Math.max(x1, b.x1)
+        y1 = Math.max(y1, b.y1)
+      }
+    if (Number.isFinite(x0)) {
+      w = Math.max(0.5, x1 - x0)
+      h = Math.max(0.5, y1 - y0)
+    }
+  }
+  const tiles = w <= 2.6 && h <= 2.6
+  const cloner = tiles
+    ? { ...defaultCloner, dx: Math.round(w * 4) / 4, dy: Math.round(h * 4) / 4 }
+    : { ...defaultCloner, cols: 4, rows: 3, dx: Math.round((w + 0.5) * 4) / 4, dy: Math.round((h + 0.5) * 4) / 4 }
+  const { scene, id } = groupNodes(s.scene, ids, "stack", { name: "Клонер", cloner })
+  s.setScene(scene)
+  if (id) s.select(id)
+}
+
+/**
+ * Solo: shows only this node (with its ancestors and everything inside it);
+ * when it is already alone, shows everything again.
+ */
+export function soloVisibility(id: string) {
+  const s = st()
+  const layers = s.scene.layers
+  const n = layers.find((l) => l.id === id)
+  if (!n) return
+  const keep = new Set<string>([id, ...ancestors(layers, id).map((g) => g.id)])
+  for (const l of layers) if (isDescendant(layers, l, id)) keep.add(l.id)
+  const alone = layers.every((l) => keep.has(l.id) || !l.visible)
+  s.updateLayers(layers.map((l) => ({ id: l.id, patch: { visible: alone ? true : keep.has(l.id) } })))
+}
+
+/** Collapses or expands a group and every group inside it (all groups when id is undefined). */
+export function setCollapsedDeep(id: string | undefined, collapsed: boolean) {
+  const s = st()
+  const layers = s.scene.layers
+  const targets = layers.filter((l) => isGroup(l) && (id === undefined || l.id === id || isDescendant(layers, l, id)))
+  if (targets.length) s.updateLayers(targets.map((g) => ({ id: g.id, patch: { collapsed: collapsed || undefined } })))
 }

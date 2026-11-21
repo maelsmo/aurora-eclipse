@@ -4,6 +4,8 @@ import {
   ArrowUpToLine,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Combine,
   Copy,
   Eye,
@@ -14,10 +16,12 @@ import {
   LockOpen,
   Pencil,
   Plus,
+  Search,
   SquareDashed,
   Trash2,
   Type,
   Ungroup,
+  X,
 } from "lucide-react"
 import { toast } from "sonner"
 import { useShallow } from "zustand/react/shallow"
@@ -40,6 +44,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   ContextMenu,
+  ContextMenuCheckboxItem,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
@@ -78,12 +83,15 @@ import { sceneAlphabet, selectedIds, useStore } from "@/state/store"
 import { cn } from "@/lib/utils"
 import {
   arrange,
+  clonerFromSelection,
   deleteSelection,
   duplicateSelection,
   groupSelection,
   moveTo,
   nodeRole,
   selectChildren,
+  setCollapsedDeep,
+  soloVisibility,
   toggleFlag,
   ungroupSelection,
   type DropTarget,
@@ -101,21 +109,36 @@ export function insertionPoint(scene: Scene, selected: string[]): { parent?: str
   return { parent: sel.parent, index: sibs.findIndex((s) => s.id === sel.id) + 1 }
 }
 
-/** Visible rows of the tree, top of the list = top of the z-order. */
-function useRows(scene: Scene) {
+/**
+ * Visible rows of the tree, top of the list = top of the z-order. With a
+ * query only matching nodes and their ancestors are listed, groups open.
+ */
+function useRows(scene: Scene, query: string) {
   return useMemo(() => {
+    const q = query.trim().toLocaleLowerCase("ru")
+    let keep: Set<string> | null = null
+    if (q) {
+      keep = new Set()
+      for (const l of scene.layers) {
+        const label = nodeLabel(l).toLocaleLowerCase("ru")
+        if (!label.includes(q) && !(l.type === "letter" && l.char.toLocaleLowerCase("ru") === q)) continue
+        keep.add(l.id)
+        for (const g of ancestors(scene.layers, l.id)) keep.add(g.id)
+      }
+    }
     const rows: { node: Layer; depth: number }[] = []
     const walk = (parent: string | undefined, depth: number) => {
       const kids = childrenOf(scene.layers, parent)
       for (let i = kids.length - 1; i >= 0; i--) {
         const n = kids[i]
+        if (keep && !keep.has(n.id)) continue
         rows.push({ node: n, depth })
-        if (isGroup(n) && !n.collapsed) walk(n.id, depth + 1)
+        if (isGroup(n) && (keep || !n.collapsed)) walk(n.id, depth + 1)
       }
     }
     walk(undefined, 0)
     return rows
-  }, [scene.layers])
+  }, [scene.layers, query])
 }
 
 function TextForm({ onDone }: { onDone: () => void }) {
@@ -406,6 +429,9 @@ function LayerRow({
             />
           }
         >
+          {Array.from({ length: depth }, (_, k) => (
+            <span key={k} aria-hidden className="pointer-events-none absolute inset-y-0 w-px bg-border" style={{ left: 13 + k * 14 }} />
+          ))}
           {over === "above" && <span aria-hidden className="pointer-events-none absolute inset-x-1 -top-px h-0.5 rounded bg-primary" />}
           {over === "below" && <span aria-hidden className="pointer-events-none absolute inset-x-1 -bottom-px h-0.5 rounded bg-primary" />}
           {isGroup(l) ? (
@@ -413,9 +439,11 @@ function LayerRow({
               type="button"
               className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background"
               aria-label={l.collapsed ? "Развернуть" : "Свернуть"}
+              title="Alt-клик — со всеми вложенными группами"
               onClick={(e) => {
                 e.stopPropagation()
-                updateLayer(l.id, { collapsed: !l.collapsed })
+                if (e.altKey) setCollapsedDeep(l.id, !l.collapsed)
+                else updateLayer(l.id, { collapsed: !l.collapsed })
               }}
             >
               {l.collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
@@ -463,10 +491,37 @@ function LayerRow({
             ) : (
               <span className="truncate text-sm leading-tight font-medium">{nodeLabel(l)}</span>
             )}
-            <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-              {role === "operand" && <Icon className="size-3 shrink-0" />}
-              {sub}
-            </span>
+            {role === "operand" && !isMask ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      className="flex w-fit items-center gap-1 truncate rounded text-xs text-muted-foreground hover:text-foreground"
+                      aria-label={"Оператор: " + opInfo[l.op].name + ", сменить"}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  }
+                >
+                  <Icon className="size-3 shrink-0" />
+                  {sub}
+                  <ChevronDown className="size-3 shrink-0 opacity-60" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-48">
+                  {ops.map((o) => {
+                    const I = opIcons[o]
+                    return (
+                      <DropdownMenuItem key={o} onClick={() => updateLayer(l.id, { op: o })}>
+                        <I />
+                        {opInfo[o].name}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">{sub}</span>
+            )}
           </span>
           <span className="flex shrink-0 items-center">
             <Button
@@ -486,9 +541,11 @@ function LayerRow({
               size="icon-xs"
               aria-label={l.visible ? "Скрыть" : "Показать"}
               className={cn(l.visible && "opacity-0 group-hover:opacity-60 focus-visible:opacity-100")}
+              title="Alt-клик — показать только этот слой"
               onClick={(e) => {
                 e.stopPropagation()
-                toggleFlag(active ? selectedIds(useStore.getState()) : [l.id], "visible")
+                if (e.altKey) soloVisibility(l.id)
+                else toggleFlag(active ? selectedIds(useStore.getState()) : [l.id], "visible")
               }}
             >
               {l.visible ? <Eye /> : <EyeOff />}
@@ -517,6 +574,12 @@ function LayerRow({
             Объединить в сплав
             <ContextMenuShortcut>⌥{MOD}G</ContextMenuShortcut>
           </ContextMenuItem>
+          {!(isGroup(l) && l.mode === "stack" && l.cloner?.enabled) && (
+            <ContextMenuItem onClick={clonerFromSelection}>
+              <Grid3x3 />
+              Сделать клонером
+            </ContextMenuItem>
+          )}
           {isGroup(l) && (
             <>
               <ContextMenuItem onClick={ungroupSelection}>
@@ -525,6 +588,19 @@ function LayerRow({
                 <ContextMenuShortcut>⇧{MOD}G</ContextMenuShortcut>
               </ContextMenuItem>
               <ContextMenuItem onClick={selectChildren}>Выделить содержимое</ContextMenuItem>
+              {l.mode === "stack" && (
+                <>
+                  <ContextMenuCheckboxItem
+                    checked={!!l.cloner?.enabled}
+                    onCheckedChange={(v) => updateLayer(l.id, { cloner: l.cloner || v ? { ...(l.cloner ?? defaultCloner), enabled: !!v } : undefined })}
+                  >
+                    Клонер
+                  </ContextMenuCheckboxItem>
+                  <ContextMenuCheckboxItem checked={!!l.mask} onCheckedChange={(v) => updateLayer(l.id, { mask: v ? true : undefined })}>
+                    Маска нижним объектом
+                  </ContextMenuCheckboxItem>
+                </>
+              )}
             </>
           )}
           <ContextMenuSeparator />
@@ -539,6 +615,10 @@ function LayerRow({
             <ContextMenuShortcut>[</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => soloVisibility(l.id)}>
+            <Eye />
+            Показать только это
+          </ContextMenuItem>
           <ContextMenuItem onClick={() => toggleFlag(selectedIds(useStore.getState()), "visible")}>
             {l.visible ? <EyeOff /> : <Eye />}
             {l.visible ? "Скрыть" : "Показать"}
@@ -565,7 +645,10 @@ export function LayersPanel() {
   const scene = useStore((s) => s.scene)
   const selected = useStore(useShallow(selectedIds))
   const renaming = useStore((s) => s.renaming)
-  const rows = useRows(scene)
+  const [query, setQuery] = useState("")
+  const rows = useRows(scene, query)
+  const groups = scene.layers.filter(isGroup)
+  const allCollapsed = groups.length > 0 && groups.every((g) => g.collapsed)
   const [drag, setDrag] = useState<DragState | null>(null)
   const anchor = useRef<string | null>(null)
   const list = useRef<HTMLUListElement>(null)
@@ -616,7 +699,19 @@ export function LayersPanel() {
         <h2 className="text-sm font-medium">
           Слои <span className="text-muted-foreground tabular-nums">· {scene.layers.length}</span>
         </h2>
-        <AddMenu />
+        <div className="flex items-center gap-1">
+          {groups.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button variant="ghost" size="icon-sm" aria-label={allCollapsed ? "Развернуть все группы" : "Свернуть все группы"} onClick={() => setCollapsedDeep(undefined, !allCollapsed)} />}
+              >
+                {allCollapsed ? <ChevronsUpDown /> : <ChevronsDownUp />}
+              </TooltipTrigger>
+              <TooltipContent>{allCollapsed ? "Развернуть все группы" : "Свернуть все группы"}</TooltipContent>
+            </Tooltip>
+          )}
+          <AddMenu />
+        </div>
       </div>
       <div className="flex items-center gap-0.5 border-b px-2 py-1">
         <Tooltip>
@@ -662,8 +757,31 @@ export function LayersPanel() {
           <TooltipContent>Удалить (Delete)</TooltipContent>
         </Tooltip>
       </div>
+      {scene.layers.length > 0 && (
+        <div className="relative border-b px-2 py-1.5">
+          <Search className="pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setQuery("")
+              if (e.key === "Enter" && rows[0]) pick(rows[0].node.id, { shiftKey: false, metaKey: false, ctrlKey: false })
+            }}
+            placeholder="Найти слой"
+            aria-label="Найти слой по названию или букве"
+            className="h-7 pr-7 pl-7 text-sm"
+          />
+          {query && (
+            <Button variant="ghost" size="icon-xs" className="absolute top-1/2 right-3 -translate-y-1/2" aria-label="Очистить поиск" onClick={() => setQuery("")}>
+              <X />
+            </Button>
+          )}
+        </div>
+      )}
       <ScrollArea className="min-h-0 flex-1">
-        {rows.length === 0 ? (
+        {query && rows.length === 0 ? (
+          <p className="p-4 text-center text-sm text-muted-foreground">Ничего не найдено</p>
+        ) : rows.length === 0 ? (
           <Empty className="p-6">
             <EmptyHeader>
               <EmptyTitle>Слоёв пока нет</EmptyTitle>
@@ -703,7 +821,7 @@ export function LayersPanel() {
         )}
       </ScrollArea>
       <p className="border-t px-3 py-2 text-xs text-muted-foreground">
-        Перетащите слой на группу, чтобы вложить. Двойной клик — переименовать, правая кнопка — действия.
+        Перетащите слой на группу, чтобы вложить. Двойной клик — переименовать, правая кнопка — действия, Alt-клик по глазу — только этот слой.
       </p>
     </aside>
   )
