@@ -227,11 +227,12 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
   }
   /** Mask records (layer texture rows), one per masking layer. */
   const maskRows = new Map<FrameItem["layers"][number], number>()
+  /** Mask record + 1 (0 = none, −1 = no room: the item is skipped rather than drawn unclipped). */
   const maskOf = (item: FrameItem) => {
     if (!item.mask) return 0
     let row = maskRows.get(item.mask)
     if (row === undefined) {
-      if (li >= MAX_LAYERS) return 0
+      if (li >= MAX_LAYERS) return -1
       row = li++
       maskRows.set(item.mask, row)
       writeLayer(item.mask, row)
@@ -252,6 +253,7 @@ export function packFrame(frame: Frame, out: Packed = createPacked()): Packed {
       K.set([FILL[lk.mode], lk.line, lk.spacing, lk.rings, lk.dot, COLOR_MODE[lk.colorMode], lk.inset, 0, lk.stripes, lk.stripeFill, lk.lineDir ? LINE_DIR[lk.lineDir] : 0, 0], o)
     }
     const mask = maskOf(item)
+    if (mask < 0) continue
     if (item.kind === "solo") {
       const l = item.layers[0]
       let row = glyphRows.get(l.glyph)

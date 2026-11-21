@@ -236,10 +236,17 @@ uniform float uGrain;
 uniform float uTime;
 uniform vec2 uRes;
 uniform sampler2D uHalo;
+uniform vec2 uHaloSize;
+uniform float uHaloF;
 out vec4 outColor;
 void main() {
   if (uPostMode == 0) { outColor = vec4(uBg.rgb * uBg.a, uBg.a); return; }
-  if (uPostMode == 3) { outColor = texture(uHalo, gl_FragCoord.xy / uRes); return; }
+  if (uPostMode == 3) {
+    // Both targets are centred on the view; the small one is 1/f the scale.
+    vec2 q = (gl_FragCoord.xy - 0.5 * uRes) / uHaloF + 0.5 * uHaloSize;
+    outColor = texture(uHalo, q / uHaloSize);
+    return;
+  }
   float n = hash2(ivec2(gl_FragCoord.xy) + ivec2(int(floor(uTime * 24.0)) * 7919, 0)) - 0.5;
   float v = (uPostMode == 1 ? max(n, 0.0) : max(-n, 0.0)) * uGrain * 0.3;
   outColor = vec4(vec3(v), 0.0);

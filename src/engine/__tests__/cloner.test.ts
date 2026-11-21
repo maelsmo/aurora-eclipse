@@ -90,28 +90,48 @@ describe("cloner layouts", () => {
 describe("effectors", () => {
   it("random is deterministic per seed and clone", () => {
     const e = fx({ kind: "random", position: 1, rotation: 1, scale: 0.5 })
-    const one = applyEffectors([e], 3, [0, 0], [0, 0], 2, 0, [0, 0], null)
-    const two = applyEffectors([e], 3, [0, 0], [0, 0], 2, 5, [0, 0], null)
-    const other = applyEffectors([{ ...e, seed: 2 }], 3, [0, 0], [0, 0], 2, 0, [0, 0], null)
+    const one = applyEffectors([e], 3, [0, 0], 2, 0, null)
+    const two = applyEffectors([e], 3, [0, 0], 2, 5, null)
+    const other = applyEffectors([{ ...e, seed: 2 }], 3, [0, 0], 2, 0, null)
     expect(one).toEqual(two)
     expect(one).not.toEqual(other)
   })
 
   it("field pushes away from the pointer and fades with distance", () => {
     const e = fx({ kind: "field", position: 1, rotation: 0, scale: 0, radius: 4 })
-    const near = applyEffectors([e], 0, [1, 0], [1, 0], 1, 0, [0, 0], [0, 0])
-    const far = applyEffectors([e], 0, [9, 0], [9, 0], 1, 0, [0, 0], [0, 0])
+    const near = applyEffectors([e], 0, [1, 0], 1, 0, [0, 0])
+    const far = applyEffectors([e], 0, [9, 0], 1, 0, [0, 0])
     expect(near.dx).toBeGreaterThan(0)
     expect(near.dy).toBeCloseTo(0)
     expect(far.dx).toBe(0)
     // Without a pointer a pointer field does nothing.
-    expect(applyEffectors([e], 0, [1, 0], [1, 0], 1, 0, [0, 0], null).dx).toBe(0)
+    expect(applyEffectors([e], 0, [1, 0], 1, 0, null).dx).toBe(0)
+  })
+
+  it("a centre field pushes clones outwards in a turned or mirrored group", () => {
+    for (const over of [{ rotation: 90 }, { rotation: 30, flipX: true }, { scale: 2 }]) {
+      const c = { kind: "linear" as const, count: 2, dx: 10, dy: 0, effectors: [fx({ kind: "field", source: "centre", position: 1, rotation: 0, scale: 0, radius: 30 })] }
+      const s = clonerScene(c, [makeLayer("◜", { set: "geo" })], over)
+      const before = buildFrame(clonerScene({ ...c, effectors: [] }, [makeLayer("◜", { set: "geo" })], over), lib, 0, FAR)
+      const after = buildFrame(s, lib, 0, FAR)
+      const g = s.layers[0]
+      after.items.forEach((it, i) => {
+        const a = before.items[i].layers[0],
+          b = it.layers[0]
+        // Further from the group centre, along the same ray.
+        const ra = Math.hypot(a.x - g.x, a.y - g.y),
+          rb = Math.hypot(b.x - g.x, b.y - g.y)
+        expect(rb, JSON.stringify(over)).toBeGreaterThan(ra + 1)
+        const cross = (a.x - g.x) * (b.y - g.y) - (a.y - g.y) * (b.x - g.x)
+        expect(Math.abs(cross) / (ra * rb), JSON.stringify(over)).toBeLessThan(1e-6)
+      })
+    }
   })
 
   it("disabled or zero-amount effectors do nothing", () => {
-    const base = applyEffectors([], 0, [1, 1], [1, 1], 1, 0, [0, 0], null)
-    expect(applyEffectors([fx({ enabled: false })], 0, [1, 1], [1, 1], 1, 0, [0, 0], null)).toEqual(base)
-    expect(applyEffectors([fx({ amount: 0 })], 0, [1, 1], [1, 1], 1, 0, [0, 0], null)).toEqual(base)
+    const base = applyEffectors([], 0, [1, 1], 1, 0, null)
+    expect(applyEffectors([fx({ enabled: false })], 0, [1, 1], 1, 0, null)).toEqual(base)
+    expect(applyEffectors([fx({ amount: 0 })], 0, [1, 1], 1, 0, null)).toEqual(base)
   })
 })
 

@@ -3,7 +3,7 @@
 // along centre lines, halftone is circles. Letters, shapes and clones that
 // repeat one glyph are traced once into <defs> and placed with <use>;
 // rectangles and ellipses stay native elements.
-import { frameBounds, sampleItem, warpReach, type Frame, type FrameItem, type FrameLayer, type RGB } from "../frame"
+import { frameBounds, layerBounds, layerField, sampleItem, warpPoint, warpReach, type Frame, type FrameItem, type FrameLayer, type RGB } from "../frame"
 import { clamp, isGeoPrim, sdGlyph } from "../sdf"
 import type { CompiledGlyph } from "../types"
 import { moduleStripes, stripesPath } from "./stripes"
@@ -121,6 +121,8 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
   // Traced glyphs and stripe bundles shared by every copy: glyph → look key → def id.
   const shared = new Map<CompiledGlyph, Map<string, string | null>>()
   const local = (p: Vec): Vec => [p[0] * UNIT, -p[1] * UNIT]
+  /** Fill defs that also carry stripes (their copies need a stroke colour too). */
+  const striped = new Set<string>()
 
   /** Def of a glyph drawn by a look in its own units, traced once; null when it draws nothing. */
   const glyphDef = (g: CompiledGlyph, look: Look): string | null => {
@@ -139,11 +141,24 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
     } else {
       body = nativeShape(g, look.inset)
       if (!body) {
+        // Modules a set fixes as lines stay stripes in any look, as on screen.
+        const forced = !!g.tiles?.some((t) => isGeoPrim(t) && !t.neg && t.mode === 2)
         const b = g.box
         const pad = 0.6 + Math.max(0, g.ink)
-        const cs = traceField((x, y) => sdGlyph(g, x, y, look.inset), { x0: b.x0 - pad, y0: b.y0 - pad, x1: b.x1 + pad, y1: b.y1 + pad }, opts.trace)
+        const cs = traceField((x, y) => sdGlyph(g, x, y, look.inset, forced), { x0: b.x0 - pad, y0: b.y0 - pad, x1: b.x1 + pad, y1: b.y1 + pad }, opts.trace)
         const d = contoursToPath(cs, local)
-        if (d) body = `<path d="${d}"/>`
+        const parts: string[] = []
+        if (d) parts.push(forced ? `<path d="${d}" stroke="none"/>` : `<path d="${d}"/>`)
+        if (forced) {
+          const st = moduleStripes(g, look.inset, look.lineDir, look.stripes, true)
+          const unitLayer = { x: 0, y: 0, cos: 1, sin: 0, scale: 1, mirror: 1, ax: 0, ay: 0, glyph: g } as FrameLayer
+          const sd = stripesPath(st, unitLayer, local, UNIT, contoursToPath)
+          if (sd) {
+            parts.push(`<path d="${sd}" fill="none" stroke-width="${+((look.stripeFill / Math.max(look.stripes, 0.1)) * UNIT).toFixed(2)}"/>`)
+            striped.add(id)
+          }
+        }
+        if (parts.length) body = parts.join("")
       }
     }
     if (body) defs.push(`<g id="${id}">${body}</g>`)
@@ -165,10 +180,22 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
       const id = glyphDef(l.glyph, look)
       tick()
       if (id) {
-        const paint = look.mode === "lines" ? `stroke="${hex(l.color)}"` : `fill="${hex(l.color)}"`
+        const paint = look.mode === "lines" ? `stroke="${hex(l.color)}"` : `fill="${hex(l.color)}"${striped.has(id) ? ` stroke="${hex(l.color)}"` : ""}`
         groups.push(`<use href="#${id}" transform="${placement(l, box)}" ${paint}${op}/>`)
       }
       return
+    }
+    // Looks other than fill are clipped by the mask afterwards (their own field stays whole).
+    let clipAttr = ""
+    if (it.mask && look.mode !== "fill") {
+      const mk = it.mask
+      const d = path((x, y) => {
+        const [wx, wy] = warpPoint(frame, x, y)
+        return layerField(mk, wx, wy)
+      }, layerBounds(mk, 0.3 + wr))
+      const id = `${uidPrefix}mask-${ii}`
+      defs.push(`<clipPath id="${id}"><path d="${d || "M0 0"}"/></clipPath>`)
+      clipAttr = ` clip-path="url(#${id})"`
     }
     const d0: Field = (x, y) => foldFronts(frame, it, x, y)
     const fuse = Math.max(0, ...it.layers.map((l) => (l.op === "fuse" ? l.k * 0.3 : 0)))
@@ -187,6 +214,14 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
         tick()
         if (d) parts.push(`<path d="${d}" fill="${m.overlapColor}" fill-opacity="${m.overlap.toFixed(3)}"/>`)
       }
+    } else if (look.mode === "lines" && it.kind === "solo" && it.layers[0].glyph.tiles?.length) {
+      // Geometric letters keep their module stripes (placed rigidly; warps are not followed).
+      const l = it.layers[0]
+      const st = moduleStripes(l.glyph, look.inset, look.lineDir, look.stripes)
+      const d = stripesPath(st, l, map, UNIT, contoursToPath)
+      tick()
+      const w = (look.stripeFill / Math.max(look.stripes, 0.1)) * l.scale * UNIT
+      if (d) parts.push(`<path d="${d}" fill="none" stroke="${hex(l.color)}" stroke-width="${+w.toFixed(2)}"/>`)
     } else if (look.mode === "outline" || look.mode === "isolines" || look.mode === "lines") {
       // Centre lines of the strokes, traced from one sampling of the field.
       // Lines follow the contour inwards: stripe k is centred (k + ½) / n inside
@@ -258,7 +293,7 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
       for (const [color, list] of byColor) parts.push(`<g fill="${color}">${list.join("")}</g>`)
       tick()
     }
-    if (parts.length) groups.push(`<g id="${uidPrefix}${it.id.replace(/#/g, "-")}"${op}>${parts.join("")}</g>`)
+    if (parts.length) groups.push(`<g id="${uidPrefix}${it.id.replace(/#/g, "-")}"${op}${clipAttr}>${parts.join("")}</g>`)
   })
   onProgress?.(1)
   const bg = transparent ? "" : `<rect width="${W}" height="${H}" fill="${m.background}"/>`

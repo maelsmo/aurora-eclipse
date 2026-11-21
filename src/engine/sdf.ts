@@ -323,7 +323,7 @@ export const isGeoPrim = (p: CompiledPrim): p is Extract<CompiledPrim, { neg: bo
  * `inset` shrinks every geometric module by inset / 2, and modules then meet
  * without fillets, so a gap opens between them.
  */
-export function sdGlyph(g: CompiledGlyph, x: number, y: number, inset = 0) {
+export function sdGlyph(g: CompiledGlyph, x: number, y: number, inset = 0, skipForcedLines = false) {
   x -= (y - 2.5) * g.shear
   let body = BIG,
     cut = BIG,
@@ -345,7 +345,7 @@ export function sdGlyph(g: CompiledGlyph, x: number, y: number, inset = 0) {
   // the CPU reference (picking, export, fallback) treats them as filled.
   if (g.tiles)
     for (const t of g.tiles)
-      if (isGeoPrim(t) && !t.neg && (t.mode === 2 || t.mode === 3)) body = Math.min(body, sdPrim(t, x, y) + inset * 0.5)
+      if (isGeoPrim(t) && !t.neg && (t.mode === 3 || (t.mode === 2 && !skipForcedLines))) body = Math.min(body, sdPrim(t, x, y) + inset * 0.5)
   let d = smax(body, -cut, g.cutK)
   d = g.attract > 0 ? smin(d, sat, g.attract) : Math.min(d, sat)
   return d - g.ink

@@ -32,7 +32,10 @@ export function rasterize(
       for (const it of frame.items) {
         const s = sampleItem(frame, it, wx, wy, px)
         const d = it.look.mode === "outline" ? Math.abs(s.d) - it.look.line / 2 : s.d
-        const a = Math.max(0, Math.min(1, 0.5 - d / px)) * it.opacity
+        let a = Math.max(0, Math.min(1, 0.5 - d / px))
+        // A mask clips what the look draws (min of coverages, as on the GPU).
+        if (s.mask !== undefined) a = Math.min(a, Math.max(0, Math.min(1, 0.5 - s.mask / px)))
+        a *= it.opacity
         if (a <= 0) continue
         let [cr, cg, cb] = s.color
         if (material.overlap > 0) {

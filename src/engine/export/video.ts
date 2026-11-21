@@ -52,7 +52,7 @@ export async function mp4Supported(width: number, height: number, fps: number) {
   if (typeof VideoEncoder === "undefined") return false
   try {
     const { canEncodeVideo, Quality } = await import("mediabunny")
-    return await canEncodeVideo("avc", { width: even(width), height: even(height), quality: new Quality(defaultBitrate(width, height, fps)) })
+    return await canEncodeVideo("avc", { width: even(width), height: even(height), quality: new Quality({ bitrate: defaultBitrate(width, height, fps) }) })
   } catch {
     return false
   }
@@ -76,7 +76,7 @@ export async function encodeMP4(source: VideoFrameSource, opts: VideoOptions): P
   const video = new CanvasSource(canvas, {
     codec: "avc",
     fullCodecString: avcCodec(width, height, fps),
-    quality: new Quality(opts.bitrate ?? defaultBitrate(width, height, fps)),
+    quality: new Quality({ bitrate: opts.bitrate ?? defaultBitrate(width, height, fps) }),
     keyFrameInterval: 2,
     alpha: "discard",
   })

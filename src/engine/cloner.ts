@@ -83,7 +83,7 @@ export function layoutClones(c: Cloner, children: number, limit: number): Clone[
     }
     case "radial": {
       const count = Math.max(1, Math.round(c.count))
-      for (let r = 0; r < Math.max(1, c.rings); r++) {
+      for (let r = 0; r < Math.max(1, Math.round(c.rings)); r++) {
         const radius = c.radius + r * c.ringStep
         for (let k = 0; k < count; k++) {
           const i = r * count + k
@@ -124,7 +124,7 @@ export function cloneCount(c: Cloner) {
     case "grid":
       return Math.round(c.cols) * Math.round(c.rows)
     case "radial":
-      return Math.round(c.count) * Math.max(1, c.rings)
+      return Math.round(c.count) * Math.max(1, Math.round(c.rings))
     default:
       return Math.round(c.count)
   }

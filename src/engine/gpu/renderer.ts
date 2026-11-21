@@ -158,7 +158,7 @@ export class GlyphRenderer {
       ...envUniforms,
       "uHaloMode", "uGlowColor", "uGlow", "uShadowColor", "uShadow",
     ])
-    this.post = this.program(postVertex, postFragment, ["uPostMode", "uBg", "uGrain", "uTime", "uRes"])
+    this.post = this.program(postVertex, postFragment, ["uPostMode", "uBg", "uGrain", "uTime", "uRes", "uHaloSize", "uHaloF"])
     gl.uniform1i(gl.getUniformLocation(this.post.prog, "uHalo"), 3)
     this.haloTex = null
     this.haloFbo = null
@@ -275,7 +275,7 @@ export class GlyphRenderer {
   }
 
   /** Back to the canvas; draws the halo target over it, magnified with bilinear filtering. */
-  private endHalo(over: boolean) {
+  private endHalo(over: boolean, f: number) {
     const gl = this.gl
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     gl.viewport(0, 0, this.canvas.width, this.canvas.height)
@@ -284,6 +284,9 @@ export class GlyphRenderer {
     gl.bindTexture(gl.TEXTURE_2D, this.haloTex)
     gl.uniform1i(this.post.loc.get("uPostMode")!, 3)
     gl.uniform2f(this.post.loc.get("uRes")!, this.canvas.width, this.canvas.height)
+    // The target is centred on the view like the canvas but rounded up in size: map pixels by centre.
+    gl.uniform2f(this.post.loc.get("uHaloSize")!, this.haloSize[0], this.haloSize[1])
+    gl.uniform1f(this.post.loc.get("uHaloF")!, f)
     gl.blendEquation(gl.FUNC_ADD)
     if (over) gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     else gl.blendFunc(gl.ONE, gl.ZERO)
@@ -319,7 +322,7 @@ export class GlyphRenderer {
       gl.blendEquation(gl.MAX)
       gl.bindVertexArray(this.vao)
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n)
-      if (f > 1) this.endHalo(false)
+      if (f > 1) this.endHalo(false, f)
     }
 
     // 2. Background underneath everything drawn so far.
@@ -349,7 +352,7 @@ export class GlyphRenderer {
       gl.bindVertexArray(this.vao)
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n)
       if (f > 1) {
-        this.endHalo(true)
+        this.endHalo(true, f)
         gl.bindVertexArray(this.vao)
       }
     }
@@ -407,6 +410,10 @@ export class GlyphRenderer {
     gl.deleteTexture(this.primTex)
     gl.deleteTexture(this.layerTex)
     gl.deleteTexture(this.lookTex)
+    if (this.haloTex) gl.deleteTexture(this.haloTex)
+    if (this.haloFbo) gl.deleteFramebuffer(this.haloFbo)
+    this.haloTex = null
+    this.haloFbo = null
     gl.deleteBuffer(this.instanceBuffer)
     gl.deleteVertexArray(this.vao)
     gl.deleteVertexArray(this.postVao)

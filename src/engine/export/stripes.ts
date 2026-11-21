@@ -74,10 +74,12 @@ function intervals(t0: number, t1: number, steps: number, inside: (t: number) =>
  * Stripes of every module drawn as lines, in the glyph's own (unsheared)
  * coordinates. `n` stripes per module, centres at (k + ½) / n.
  */
-export function moduleStripes(g: CompiledGlyph, inset: number, lineDir: Look["lineDir"], n: number): ModuleStripes {
+export function moduleStripes(g: CompiledGlyph, inset: number, lineDir: Look["lineDir"], n: number, forcedOnly = false): ModuleStripes {
   const segs: StripeSeg[] = []
   const contours: Contour[] = []
-  const tiles = (g.tiles ?? []).filter((t): t is Geo => isGeoPrim(t) && !t.neg && t.mode !== 1 && t.mode !== 3)
+  // In the lines look every module not fixed as fill or outline is striped;
+  // in other looks only the modules a set fixes as lines (mode 2).
+  const tiles = (g.tiles ?? []).filter((t): t is Geo => isGeoPrim(t) && !t.neg && (forcedOnly ? t.mode === 2 : t.mode !== 1 && t.mode !== 3))
   const cuts = g.prims.filter((p): p is Geo => isGeoPrim(p) && p.neg)
   const strokeCuts = g.prims.filter((p) => p.kind === "hole" || p.kind === "slot")
   const free = (x: number, y: number) => {

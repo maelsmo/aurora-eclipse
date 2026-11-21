@@ -8,7 +8,7 @@ import { BIG, sdBox, sdGlyph, clamp } from "./sdf"
 import { CAP } from "./grid"
 import type { Box, CompiledGlyph } from "./types"
 import { CLONE_LIMITS, type Cloner, type Layer, type LetterNode, type Look, type LookPatch, type Material, type Scene, type ShapeNode, type Warp } from "./scene/types"
-import { identity, nodeXf, xfApply, xfCompose, type Xf } from "./scene/tree"
+import { identity, nodeXf, xfApply, xfCompose, xfInvert, type Xf } from "./scene/tree"
 import { hash2, noise2 } from "./noise"
 import { layoutClones } from "./cloner"
 import { applyEffectors, noEffect } from "./effectors"
@@ -266,7 +266,8 @@ export function buildFrame(
     const list = layoutClones(c, protos.length, limit)
     clones += list.length
     const cell = clonerCell(c)
-    const centre: [number, number] = [ctx.xf.x, ctx.xf.y]
+    // Effectors work in the group's own frame: the pointer is brought into it.
+    const local = c.effectors.some((e) => e.kind === "field" && e.source === "pointer") ? xfApply(xfInvert(ctx.xf), pointer[0], pointer[1]) : null
     const palette = c.palette.length ? c.palette : null
     const fx = noEffect()
     for (const cl of list) {
@@ -276,7 +277,7 @@ export function buildFrame(
         tintW = ctx.tintW
       if (c.effectors.length) {
         Object.assign(fx, noEffect())
-        applyEffectors(c.effectors, cl.index, [x, y], xfApply(ctx.xf, x, y), cell, time, centre, pointer, fx)
+        applyEffectors(c.effectors, cl.index, [x, y], cell, time, local, ctx.xf.s, fx)
         x += fx.dx
         y += fx.dy
         rotation += fx.rotation
@@ -354,6 +355,8 @@ export type Sample = {
   overlap: number
   /** Distance to the union of all pairwise overlaps (layer ∩ everything below). */
   overlapD: number
+  /** Field of the item's mask, when it has one (negative inside). */
+  mask?: number
 }
 
 /**
@@ -365,13 +368,20 @@ export function sampleItem(f: Frame, item: FrameItem, x: number, y: number, px =
   return foldItem(item, wx, wy, px)
 }
 
-/** Fold of an item, clipped by its mask. */
+/**
+ * Fold of an item. A mask clips filled looks in the field itself (the
+ * intersection); outlines, isolines and halftone keep their own field and are
+ * clipped afterwards by `mask` coverage, like on the GPU.
+ */
 function foldItem(item: FrameItem, wx: number, wy: number, px: number): Sample {
   const s = foldLayers(item.layers, wx, wy, px, item.look.inset)
   if (item.mask) {
     const m = layerField(item.mask, wx, wy)
-    s.d = Math.max(s.d, m)
-    s.overlapD = Math.max(s.overlapD, m)
+    s.mask = m
+    if (item.look.mode === "fill" || item.look.mode === "lines") {
+      s.d = Math.max(s.d, m)
+      s.overlapD = Math.max(s.overlapD, m)
+    }
   }
   return s
 }

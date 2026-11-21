@@ -185,3 +185,44 @@ describe("svg placement and native elements", () => {
     expect(Math.max(...xs)).toBeLessThan(1.05)
   })
 })
+
+describe("masks and fixed modules in export", () => {
+  const lib = defaultLibrary()
+  const box = { x0: -10, y0: -8, x1: 10, y1: 8 }
+
+  it("clips outlines by the mask instead of outlining the mask edge", async () => {
+    const { makeScene, makeShape, makeGroup, defaultLook } = await import("../scene")
+    const { sampleItem } = await import("../frame")
+    const g = makeGroup("stack", { mask: true })
+    const mask = { ...makeShape({ kind: "rect", w: 2, h: 6 }), parent: g.id }
+    const tile = { ...makeShape({ kind: "rect", w: 6, h: 2 }), parent: g.id }
+    const s = makeScene({ layers: [g, mask, tile], look: { ...defaultLook, mode: "outline" } })
+    const f = buildFrame(s, lib, 0, [1e4, 1e4])
+    const it = f.items[0]
+    // Inside the bar, on the mask edge: the bar's own field is still negative there.
+    const smp = sampleItem(f, it, 1, 0)
+    expect(smp.d).toBeLessThan(-0.5)
+    expect(Math.abs(smp.mask!)).toBeLessThan(1e-6)
+    const svg = frameToSVG(f, s.material, { box })
+    expect(svg).toMatch(/clip-path="url\(#[^)]+mask-0\)"/)
+  })
+
+  it("keeps modules fixed as lines striped in a filled look", async () => {
+    const { makeScene } = await import("../scene")
+    const s = makeScene({ set: "geo", layers: [makeLayer("▤", { set: "geo" })] })
+    const svg = frameToSVG(buildFrame(s, lib, 0, [1e4, 1e4]), s.material, { box })
+    expect(svg).toMatch(/<path d="[^"]+" fill="none" stroke-width=/)
+    expect(svg).toMatch(/<use [^>]*fill="#[0-9a-f]{6}" stroke="#[0-9a-f]{6}"/)
+  })
+
+  it("exports masked geometric lines as module stripes", async () => {
+    const { makeScene, makeShape, makeGroup, defaultLook } = await import("../scene")
+    const g = makeGroup("stack", { mask: true })
+    const mask = { ...makeShape({ kind: "rect", w: 3, h: 3 }), parent: g.id }
+    const letter = { ...makeLayer("O", { set: "geo" }), parent: g.id }
+    const s = makeScene({ set: "geo", layers: [g, mask, letter], look: { ...defaultLook, mode: "lines", stripes: 1.6, stripeFill: 0.5 } })
+    const svg = frameToSVG(buildFrame(s, lib, 0, [1e4, 1e4]), s.material, { box })
+    expect(svg).toMatch(/A\d/)
+    expect(svg).toContain("clip-path=")
+  })
+})

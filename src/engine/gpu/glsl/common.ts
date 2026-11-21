@@ -264,19 +264,24 @@ Parts glyphParts(ivec4 R, vec2 p, vec4 g, float shear, float inset, int lookMode
       else if (!skipMerged) body = min(body, d);
     }
   }
-  if (useTiles || solo) {
+  // Tiles: one by one with an inset, striped or outlined in solo instances;
+  // elsewhere (merges, halos, masks) modules a set fixes as lines or outlines
+  // are not in the merged field and count as filled, like the CPU reference.
+  if (R.w > 0) {
     for (int n = 0; n < MAX_GLYPH_PRIMS; n++) {
       if (n >= R.w) break;
       int i = R.z + n;
       vec4 t0 = prim(i, 0);
       vec4 f = prim(i, 2);
       if (f.w > 0.5) continue; // cut-outs already come from the field primitives
+      int fixedMode = int(f.y + 0.5);
+      if (!useTiles && !solo && fixedMode < 2) continue;
       int kind = int(t0.x + 0.5);
-      int m = int(f.y + 0.5);
+      int m = fixedMode;
       if (m == 0) m = linesLook ? 2 : 1;
       if (!solo) m = 1;
       float d = geoField(kind, i, p, t0) + inset * 0.5;
-      if (m == 1) { if (skipMerged) body = min(body, d); }
+      if (m == 1) { if (skipMerged || fixedMode >= 2) body = min(body, d); }
       else if (m == 3) outl = min(outl, abs(d));
       else lines += clamp(0.5 - d / aaD, 0.0, 1.0) * stripeCov(stripeF(kind, i, p, t0, st.z > 0.5 ? st.z - 1.0 : f.z, d), st.xy, aaD);
     }

@@ -30,6 +30,7 @@ export class Runtime {
   /** Rigid-body world of the live view (created when physics is first on). */
   physics: PhysicsWorld | null = null
   private physicsLayers: Layer[] | null = null
+  private physicsShape = ""
 
   /**
    * Physics of a freshly built frame: syncs the bodies with its items, steps
@@ -49,9 +50,12 @@ export class Runtime {
       return
     }
     const w = (this.physics ??= new PhysicsWorld(M))
-    if (source.layers !== this.physicsLayers) {
+    // Bodies are rebuilt when the objects change, or the collision shape or the body limit does.
+    const shape = `${p.shape}|${p.maxBodies}`
+    if (source.layers !== this.physicsLayers || shape !== this.physicsShape) {
       w.reset()
       this.physicsLayers = source.layers
+      this.physicsShape = shape
     }
     const input = { pointer: this.pointerWorld, locked: lockedIds(source.layers) }
     w.sync(frame, p, eff.artboard, input)

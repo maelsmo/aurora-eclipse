@@ -15,20 +15,20 @@ const smooth = (e0: number, e1: number, x: number) => {
 }
 
 /**
- * Sums the effectors for one clone. `p` is the clone position in the group,
- * `world` its world position, `cell` the layout step (position weights are
- * in cells), `centre` the cloner centre in world, `pointer` the pointer in
- * world (null when absent).
+ * Sums the effectors for one clone. Everything is in the cloner group's own
+ * coordinates: `p` is the clone position, `cell` the layout step (position
+ * weights are in cells), `pointer` the pointer (null when absent); the
+ * cloner centre is the origin. `scale` converts group units to world units,
+ * so a field radius means the same on screen whatever the group's size.
  */
 export function applyEffectors(
   effectors: Effector[],
   index: number,
   p: [number, number],
-  world: [number, number],
   cell: number,
   time: number,
-  centre: [number, number],
   pointer: [number, number] | null,
+  scale = 1,
   out: EffectorOut = noEffect(),
 ): EffectorOut {
   for (const e of effectors) {
@@ -63,12 +63,12 @@ export function applyEffectors(
         break
       }
       case "field": {
-        const src = e.source === "pointer" ? pointer : centre
+        const src: [number, number] | null = e.source === "pointer" ? pointer : [0, 0]
         if (!src) continue
-        const dx = world[0] - src[0],
-          dy = world[1] - src[1]
+        const dx = p[0] - src[0],
+          dy = p[1] - src[1]
         const dist = Math.hypot(dx, dy)
-        const f = 1 - smooth(0, e.radius, dist)
+        const f = 1 - smooth(0, e.radius, dist * scale)
         if (f <= 0) continue
         ux = dist > 1e-6 ? dx / dist : 0
         uy = dist > 1e-6 ? dy / dist : 0
