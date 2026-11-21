@@ -58,6 +58,8 @@ describe("geometric set", () => {
         for (const [x, y] of primPoints(p)) {
           expect(Math.abs(x * 8 - Math.round(x * 8)), c).toBeLessThan(1e-9)
           expect(Math.abs(y * 8 - Math.round(y * 8)), c).toBeLessThan(1e-9)
+          // Cut-outs may reach past the letter; ink stays in the metric zone.
+          if ("neg" in p && p.neg) continue
           expect(y).toBeGreaterThanOrEqual(-1.25)
           expect(y).toBeLessThanOrEqual(6.25)
         }
