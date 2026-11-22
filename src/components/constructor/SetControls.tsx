@@ -10,7 +10,7 @@ import type { SetBase, SetKind } from "@/engine/alphabet/sets"
 import { editingSetOf, useStore } from "@/state/store"
 
 const bases: { base: SetBase; kind: SetKind; name: string; hint: string }[] = [
-  { base: "geo", kind: "shapes", name: "Геометрический", hint: "Основа — сет «Геометрия»: клетки, четверти, прорези" },
+  { base: "geo", kind: "shapes", name: "Геометрический", hint: "Основа — сет «Геометрия»: клетки, четверти, тени-просветы" },
   { base: "default", kind: "strokes", name: "Штриховой", hint: "Основа — штриховой алфавит с осями" },
   { base: "empty", kind: "shapes", name: "Пустой", hint: "Знаки рисуются с нуля" },
 ]

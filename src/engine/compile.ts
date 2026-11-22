@@ -3,6 +3,7 @@
 
 import type { Axes } from "./axes"
 import { CAP } from "./grid"
+import { sdRoundBox4 } from "./sdf"
 import {
   assertNever,
   type Alphabet,
@@ -264,10 +265,10 @@ export function compilePrims(prims: PrimDef[], axes: Axes): CompiledGlyph {
         const k = Math.min(kx, ky)
         // Radii go up to the full side (a quarter disc cell).
         const r = (p.r ?? [0, 0, 0, 0]).map((v) => Math.max(0, Math.min(v * k, 2 * hx, 2 * hy))) as [number, number, number, number]
-        // Positive modules follow the terminal axis: 1 — the cuts are arcs (quarters, bowls),
+        // Modules follow the terminal axis: 1 — the corner cuts are arcs (quarters, bowls),
         // 0 — straight 45° cuts through the same points ("прямой срез"): a quarter becomes a
-        // triangle, a dome a roof, a bowl an octagon. Cut-outs keep their round ends.
-        const t = p.neg ? 1 : Math.max(0, Math.min(1, axes.terminal))
+        // triangle, a bowl an octagon; a round cut-out becomes a diamond, the end of a slot a point.
+        const t = Math.max(0, Math.min(1, axes.terminal))
         out.push({ kind: "box", c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], h: [hx, hy], r, ...(t < 1 ? { t } : {}), ...geoFlags(p) })
         if (!p.neg) {
           grow(box, Math.min(a[0], b[0]), Math.min(a[1], b[1]), 0)
@@ -391,7 +392,71 @@ export function mergeTiles(tiles: Geo[]): Geo[] {
       }
   }
   // Cut-outs last, so the order matches the glyph rules (body, then cuts).
-  return [...boxes, ...rest.filter((t) => !t.neg), ...rest.filter((t) => t.neg)]
+  return [...boxes, ...welds(boxes), ...rest.filter((t) => !t.neg), ...rest.filter((t) => t.neg)]
+}
+
+/** How far a weld reaches into the two tiles it joins, and the hairline weld under it. */
+const WELD = 0.4
+const WELD_THIN = 0.04
+
+/**
+ * Welds: boxes that touch along a part of an edge cannot merge into one box
+ * (a stem and a bowl, two quarters of different size), and min() of their
+ * fields reads 0 along the seam — a hairline in the fill. A weld is a box
+ * laid across the seam, inside both tiles: a thick one where both are solid,
+ * and a thin one up to the points where their corner cuts leave the seam.
+ */
+function welds(boxes: CBox[]): CBox[] {
+  const out: CBox[] = []
+  const ext = (b: CBox) => [b.c[0] - b.h[0], b.c[1] - b.h[1], b.c[0] + b.h[0], b.c[1] + b.h[1]] as const
+  const inside = (b: CBox, x: number, y: number) => sdRoundBox4(x, y, b.c[0], b.c[1], b.h[0], b.h[1], b.r, b.t ?? 1) <= 1e-9
+  const make = (x0: number, y0: number, x1: number, y1: number): CBox => ({ kind: "box", c: [(x0 + x1) / 2, (y0 + y1) / 2], h: [(x1 - x0) / 2, (y1 - y0) / 2], r: [0, 0, 0, 0], mode: 0, dir: 0, neg: false })
+  /** Moves the end `from` of a span towards `to` until the weld corner (given by `at`) is inside the tile. */
+  const trim = (from: number, to: number, ok: (s: number) => boolean) => {
+    if (ok(from)) return from
+    let lo = from,
+      hi = to
+    for (let k = 0; k < 24; k++) {
+      const m = (lo + hi) / 2
+      if (ok(m)) hi = m
+      else lo = m
+    }
+    return hi
+  }
+  for (let i = 0; i < boxes.length; i++)
+    for (let j = 0; j < boxes.length; j++) {
+      if (i === j) continue
+      const a = boxes[i],
+        b = boxes[j]
+      const [ax0, ay0, ax1, ay1] = ext(a)
+      const [bx0, by0, bx1, by1] = ext(b)
+      // r: tl, tr, br, bl. `a` on the left of a vertical seam, or below a horizontal one.
+      if (near(ax1, bx0)) {
+        const y0 = Math.max(ay0 + a.r[2], by0 + b.r[3]),
+          y1 = Math.min(ay1 - a.r[1], by1 - b.r[0])
+        if (y1 - y0 < 1e-6) continue
+        const w = Math.min(WELD, a.h[0], b.h[0])
+        const mid = (y0 + y1) / 2
+        const ok = (y: number) => inside(a, ax1 - w, y) && inside(b, ax1 + w, y)
+        const t0 = trim(y0, mid, ok),
+          t1 = trim(y1, mid, ok)
+        if (t1 - t0 > 1e-6) out.push(make(ax1 - w, t0, ax1 + w, t1))
+        if (t0 - y0 > 1e-6 || y1 - t1 > 1e-6) out.push(make(ax1 - WELD_THIN, y0, ax1 + WELD_THIN, y1))
+      }
+      if (near(ay1, by0)) {
+        const x0 = Math.max(ax0 + a.r[0], bx0 + b.r[3]),
+          x1 = Math.min(ax1 - a.r[1], bx1 - b.r[2])
+        if (x1 - x0 < 1e-6) continue
+        const w = Math.min(WELD, a.h[1], b.h[1])
+        const mid = (x0 + x1) / 2
+        const ok = (x: number) => inside(a, x, ay1 - w) && inside(b, x, ay1 + w)
+        const t0 = trim(x0, mid, ok),
+          t1 = trim(x1, mid, ok)
+        if (t1 - t0 > 1e-6) out.push(make(t0, ay1 - w, t1, ay1 + w))
+        if (t0 - x0 > 1e-6 || x1 - t1 > 1e-6) out.push(make(x0, ay1 - WELD_THIN, x1, ay1 + WELD_THIN))
+      }
+    }
+  return out
 }
 
 /** LRU cache of compiled glyphs; clones with quantised axes stay well inside it. */

@@ -119,23 +119,75 @@ describe("geometric set", () => {
     expect(diff("M", "U")).toBeGreaterThan(100)
   })
   it("stripes continue across the joint of a round cell and a stem", () => {
-    // A: the dome cell (arcs) sits on the leg cell (vertical stripes) along y = 2.5.
-    const g = compileGlyph("A", geoAlphabet, defaultAxes, "geo-test")
+    // U: the stem cell (vertical stripes) stands on the quarter cell (arcs) along y = 2.5.
+    const g = compileGlyph("U", geoAlphabet, defaultAxes, "geo-test")
     const tiles = g.tiles!.filter((t) => isGeoPrim(t) && !t.neg) as Extract<CompiledPrim, { neg: boolean }>[]
-    const dome = tiles.find((t) => t.kind === "box" && t.c[0] < 2.5 && t.c[1] > 2.5)!
-    const leg = tiles.find((t) => t.kind === "box" && t.c[0] < 2.5 && t.c[1] < 2.5)!
+    const dome = tiles.find((t) => t.kind === "box" && t.c[0] < 2.5 && t.c[1] < 2.5)!
+    const leg = tiles.find((t) => t.kind === "box" && t.c[0] < 2.5 && t.c[1] > 2.5)!
     expect(arcCentre(dome)).toEqual([2.5, 2.5])
     const n = 1.6,
       fill = 0.5
     let agree = 0,
       total = 0
     for (let x = 0.01; x < 2.45; x += 0.013) {
-      const above = onStripe(stripeCoord(dome, x, 2.5 + 1e-6, 0), n, fill)
-      const below = onStripe(stripeCoord(leg, x, 2.5 - 1e-6, 0), n, fill)
+      const above = onStripe(stripeCoord(leg, x, 2.5 + 1e-6, 0), n, fill)
+      const below = onStripe(stripeCoord(dome, x, 2.5 - 1e-6, 0), n, fill)
       total++
       if (above === below) agree++
     }
     expect(agree / total).toBeGreaterThan(0.99)
+  })
+  it("tiles that touch along a part of an edge are welded: no seam in the fill", () => {
+    // J: the hook quarter meets the stem column along x = 2.5 below the bay; B: the stem meets
+    // both bowls, and the bowls meet each other up to the waist notch.
+    const j = compileGlyph("J", geoAlphabet, defaultAxes, "geo-test")
+    for (const y of [0.4, 0.8, 1.2]) expect(sdGlyph(j, 2.5, y), `J ${y}`).toBeLessThan(-0.3)
+    const b = compileGlyph("B", geoAlphabet, defaultAxes, "geo-test")
+    for (const y of [0.5, 2.5, 4.5]) expect(sdGlyph(b, 2.5, y), `B stem ${y}`).toBeLessThan(-0.3)
+    expect(sdGlyph(b, 3.2, 2.5)).toBeLessThan(-0.3)
+    // The weld stops where the bowls part: the waist notch stays open.
+    expect(sdGlyph(b, 4.7, 2.5)).toBeGreaterThan(0.1)
+    // Welds never stick out of the letter: the ink is the union of the tiles, no more.
+    for (const c of charset) {
+      const g = compileGlyph(c, geoAlphabet, defaultAxes, "geo-test")
+      const pos = g.tiles!.filter((t) => isGeoPrim(t) && !t.neg)
+      for (let y = g.box.y0 - 0.2; y < g.box.y1 + 0.2; y += 0.11)
+        for (let x = g.box.x0 - 0.2; x < g.box.x1 + 0.2; x += 0.11) {
+          if (sdGlyph(g, x, y) >= -1e-3) continue
+          const inTile = pos.some((t) => sdRoundBox4(x, y, (t as { c: number[] }).c[0], (t as { c: number[] }).c[1], (t as { h: number[] }).h[0], (t as { h: number[] }).h[1], (t as { r: number[] }).r) <= 1e-6)
+          if (!inTile) throw new Error(`${c}: ink outside the tiles at ${x.toFixed(2)}, ${y.toFixed(2)}`)
+        }
+    }
+  })
+  it("no two letters share a silhouette, at round and at straight terminals", () => {
+    const sample = (c: string, terminal: number) => {
+      const g = compileGlyph(c, geoAlphabet, { ...defaultAxes, terminal }, "geo-test")
+      const out: boolean[] = []
+      for (let y = -1.2; y < 6.4; y += 0.125) for (let x = 0.0625; x < 7.5; x += 0.125) out.push(sdGlyph(g, x, y) < 0)
+      return out
+    }
+    const same = (a: string, b: string) => {
+      const base = (c: string): string => (geoAlphabet[c].base && !geoAlphabet[c].prims.length ? base(geoAlphabet[c].base!) : c)
+      return base(a) === base(b)
+    }
+    const letters = [...charset]
+    for (const terminal of [1, 0]) {
+      const ink = new Map(letters.map((c) => [c, sample(c, terminal)]))
+      const close: string[] = []
+      for (let i = 0; i < letters.length; i++)
+        for (let j = i + 1; j < letters.length; j++) {
+          const a = letters[i],
+            b = letters[j]
+          if (same(a, b)) continue
+          const ia = ink.get(a)!,
+            ib = ink.get(b)!
+          let d = 0
+          for (let k = 0; k < ia.length; k++) if (ia[k] !== ib[k]) d++
+          // 1/64 m² per sample: at least 0.75 m² of the 25 m² block differs.
+          if (d < 48) close.push(`${a}${b}:${d}`)
+        }
+      expect(close, `terminal ${terminal}`).toEqual([])
+    }
   })
   it("the library resolves letters through their own set, the scene set, the fallback", () => {
     const lib = defaultLibrary()
