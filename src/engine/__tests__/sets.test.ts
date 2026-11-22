@@ -113,7 +113,11 @@ describe("geometric set", () => {
       for (let y = 0.05; y < 5; y += 0.1) for (let x = 0.05; x < 5; x += 0.1) out.push(sdGlyph(g, x, y) < 0)
       return out
     }
-    const diff = (a: string, b: string) => ink(a).reduce((n, v, i) => n + (v !== ink(b)[i] ? 1 : 0), 0)
+    // Each letter is sampled once: sampling the second one inside the loop took seconds on a CI runner.
+    const diff = (a: string, b: string) => {
+      const ib = ink(b)
+      return ink(a).reduce((n, v, i) => n + (v !== ib[i] ? 1 : 0), 0)
+    }
     // Several percent of the 2 × 2 block, not just a slot.
     expect(diff("A", "H")).toBeGreaterThan(200)
     expect(diff("M", "U")).toBeGreaterThan(100)
