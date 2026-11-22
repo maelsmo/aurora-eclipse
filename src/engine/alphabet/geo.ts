@@ -13,9 +13,10 @@
 // - The moon letters C G Э are a disc eclipsed by a bigger shadow: a crescent.
 // - Each cell carries its stripe direction: stems vertical, bars horizontal,
 //   rounded cells concentric arcs — the «lines» look draws the letter as
-//   bundles of parallel lines, the inset opens gaps between cells (a mosaic),
-//   the terminal axis cuts quarters and bowls straight at 0, the outline
-//   leaves the contour.
+//   bundles of parallel lines, five to a cell. Shadows keep to the half-module
+//   grid, so a bay or a pupil takes out whole lines and never splits one.
+// - The inset opens gaps between cells (a mosaic), the terminal axis turns
+//   everything round into 45° facets at 0, the outline leaves the contour.
 import type { Alphabet, BoxDef, PolyDef, PrimDir, SectorDef, Vec } from "../types"
 
 const C = 2.5 // cell
@@ -37,8 +38,8 @@ const cell = (i: number, j: number, round: Corner[] = [], dir: PrimDir = "v", r 
 })
 /** Square cell. */
 const sq = (i: number, j: number, dir: PrimDir = "v") => cell(i, j, [], dir)
-/** Cell with bowl-radius corners. */
-const bowl = (i: number, j: number, round: Corner[]) => cell(i, j, round, "arc", H)
+/** Cell with bowl-radius corners; its lines follow its own contour and ring the pupil in its middle. */
+const bowl = (i: number, j: number, round: Corner[]): BoxDef => ({ ...cell(i, j, round, "arc", H), dir: "contour" })
 /** Bar (horizontal stripes) or stem (vertical stripes) of any size; they overlap the cells they join. */
 const bar = (x0: number, y0: number, x1: number, y1: number, r?: BoxDef["r"]): BoxDef => ({ kind: "box", a: [x0, y0], b: [x1, y1], dir: "h", ...(r ? { r } : {}) })
 const stem = (x0: number, y0: number, x1: number, y1: number, r?: BoxDef["r"]): BoxDef => ({ kind: "box", a: [x0, y0], b: [x1, y1], dir: "v", ...(r ? { r } : {}) })
@@ -59,7 +60,7 @@ const fromLeft = (y: number, xc: number): BoxDef => ({ kind: "box", a: [-OUT, y 
 const fromRight = (y: number, xc: number, w = CAP): BoxDef => ({ kind: "box", a: [xc - R, y - R], b: [w + OUT, y + R], r: [R, 0, 0, R], neg: true })
 /** Wedge: a straight cut (diagonal letters). */
 const wedge = (...pts: Vec[]): PolyDef => ({ kind: "poly", pts, neg: true })
-/** Missing part of a cell; `r` softens the inner corner it leaves. */
+/** Missing part of a cell (`r` rounds the end of a short bay). */
 const gap = (x0: number, y0: number, x1: number, y1: number, r?: BoxDef["r"]): BoxDef => ({ kind: "box", a: [x0, y0], b: [x1, y1], ...(r ? { r } : {}), neg: true })
 /** The big shadow of the moon letters C G Э, and its upper half. */
 const MOON = 1.5
@@ -69,42 +70,43 @@ const halfMoon = (cx: number, cy: number): BoxDef => ({ kind: "box", a: [cx - MO
 const roof = () => [wedge([-OUT, C - OUT], [C + OUT, CAP + OUT], [-OUT, CAP + OUT]), wedge([CAP + OUT, C - OUT], [C - OUT, CAP + OUT], [CAP + OUT, CAP + OUT])]
 /** Round accent (Ё). */
 const dot = (cx: number, cy: number, r = R): BoxDef => ({ kind: "box", a: [cx - r, cy - r], b: [cx + r, cy + r], r: [r, r, r, r], dir: "arc" })
-/** Descender (Д Ц Щ): half a cell wide, one module deep, overlapping the cell above. */
-const tail = (x0: number) => stem(x0, -1, x0 + H, OUT)
+/** Descender (Д Ц Щ): three lines wide, one module deep, overlapping the cell above. */
+const TAIL = 1.5
+const tail = (x0: number) => stem(x0, -1, x0 + TAIL, OUT)
 const alias = (base: string) => ({ base, prims: [] })
 
 export const geoLatin: Alphabet = {
   // A roof on a slab: the pupil under the ridge, the bay between the legs.
   A: { adv: 5, prims: [...slab(), ...roof(), eye(C, 3.5), fromBottom(C, 1.5)] },
-  // Stem and two bowls, a pupil in each.
-  B: { adv: 5, prims: [sq(0, 1), bowl(1, 1, ["tr", "br"]), sq(0, 0), bowl(1, 0, ["tr", "br"]), eye(C, 3.5), eye(C, 1.5)] },
+  // Stem and two bowls, a pupil in the middle of each.
+  B: { adv: 5, prims: [sq(0, 1), bowl(1, 1, ["tr", "br"]), sq(0, 0), bowl(1, 0, ["tr", "br"]), eye(C + H, C + H), eye(C + H, H)] },
   // A disc eclipsed from the right.
   C: { adv: 5, prims: [...disc(), eye(3.875, C, MOON)] },
   D: { adv: 5, prims: [sq(0, 1), cell(1, 1, ["tr"]), sq(0, 0), cell(1, 0, ["br"]), eye(C, C, 1)] },
   // Stem and three arms: two bays enter from the right.
-  E: { adv: 5, prims: [sq(0, 1), sq(1, 1, "h"), sq(0, 0), sq(1, 0, "h"), fromRight(3.5, 3), fromRight(1.5, 3)] },
-  F: { adv: 5, prims: [sq(0, 1), sq(1, 1, "h"), sq(0, 0), sq(1, 0, "h"), fromRight(3.5, 3), gap(C, -OUT, CAP + OUT, 2, [R, 0, 0, 0])] },
+  E: { adv: 5, prims: [sq(0, 1), sq(1, 1, "h"), sq(0, 0), sq(1, 0, "h"), fromRight(3.5, C), fromRight(1.5, C)] },
+  F: { adv: 5, prims: [sq(0, 1), sq(1, 1, "h"), sq(0, 0), sq(1, 0, "h"), fromRight(3.5, C), gap(C, -OUT, CAP + OUT, 2)] },
   // The upper half of the shadow only: the square chin keeps a flat bar.
   G: { adv: 5, prims: [cell(0, 1, ["tl"]), cell(1, 1, ["tr"]), cell(0, 0, ["bl"]), sq(1, 0, "h"), halfMoon(3.875, C)] },
   H: { adv: 5, prims: [...slab(), fromTop(C, 3.5), fromBottom(C, 1.5)] },
   I: { adv: 2.5, prims: [sq(0, 1), sq(0, 0)] },
   // The top-left cell is missing; a short bay curls the hook.
-  J: { adv: 5, prims: [sq(1, 1), cell(1, 0, ["br"]), cell(0, 0, ["bl"]), gap(1.5, 1.5, C, C + OUT, [0, 0, R, R])] },
+  J: { adv: 5, prims: [sq(1, 1), cell(1, 0, ["br"]), cell(0, 0, ["bl"]), gap(1.5, 1.5, C, C, [0, 0, R, R])] },
   // Three wedges: between the stem and each arm, and between the arms.
   K: { adv: 5, prims: [...slab(), wedge([2, 3.5], [3.75, 5.25], [2, 5.25]), wedge([2, 1.5], [3.75, -0.25], [2, -0.25]), wedge([3.5, 2.5], [5.25, 4.25], [5.25, 0.75])] },
-  L: { adv: 5, prims: [...slab("v", "v", "v", "h"), gap(C, 2, CAP + OUT, CAP + OUT, [0, 0, 0, R])] },
+  L: { adv: 5, prims: [...slab("v", "v", "v", "h"), gap(C, 2, CAP + OUT, CAP + OUT)] },
   M: { adv: 7.5, prims: [...wide(), wedge([1.75, 5.25], [5.75, 5.25], [3.75, 3.25]), wedge([2, -0.25], [4, -0.25], [2, 1.75]), wedge([5.5, -0.25], [3.5, -0.25], [5.5, 1.75])] },
   N: { adv: 5, prims: [...slab(), wedge([1.25, 5.25], [3.5, 5.25], [3.5, 3]), wedge([1.5, -0.25], [3.75, -0.25], [1.5, 2])] },
   // A ring: the shadow sits in the middle of the disc.
   O: { adv: 5, prims: [...disc(), eye(C, C, 1)] },
-  P: { adv: 5, prims: [sq(0, 1), bowl(1, 1, ["tr", "br"]), sq(0, 0), eye(C, 3.75)] },
+  P: { adv: 5, prims: [sq(0, 1), bowl(1, 1, ["tr", "br"]), sq(0, 0), eye(C + H, C + H)] },
   // O with a square corner for the tail.
   Q: { adv: 5, prims: [cell(0, 1, ["tl"]), cell(1, 1, ["tr"]), cell(0, 0, ["bl"]), sq(1, 0, "h"), eye(C, C, 1)] },
   // P on two legs: a bay between them, a wedge kicks the right one out.
-  R: { adv: 5, prims: [sq(0, 1), bowl(1, 1, ["tr", "br"]), sq(0, 0), sq(1, 0), eye(C, 3.75), fromBottom(C, 1), wedge([3.75, 2.5], [5.25, 2.5], [5.25, 1])] },
+  R: { adv: 5, prims: [sq(0, 1), bowl(1, 1, ["tr", "br"]), sq(0, 0), sq(1, 0), eye(C + H, C + H), fromBottom(C, 1), wedge([3.75, 2.5], [5.25, 2.5], [5.25, 1])] },
   // A leaf (two quarters) with a bay from each side.
   S: { adv: 5, prims: [cell(0, 1, ["tl"]), sq(1, 1, "h"), sq(0, 0, "h"), cell(1, 0, ["br"]), fromRight(3.5, 2.5), fromLeft(1.5, 2.5)] },
-  T: { adv: 5, prims: [...slab("h", "h", "v", "v"), gap(-OUT, -OUT, H, 3, [0, R, 0, 0]), gap(CAP - H, -OUT, CAP + OUT, 3, [R, 0, 0, 0])] },
+  T: { adv: 5, prims: [...slab("h", "h", "v", "v"), gap(-OUT, -OUT, 1.5, 3), gap(3.5, -OUT, CAP + OUT, 3)] },
   U: { adv: 5, prims: [sq(0, 1), sq(1, 1), cell(0, 0, ["bl"]), cell(1, 0, ["br"]), fromTop(C, 2.5)] },
   // The angular twin of U: the sides taper, the bay ends in a point.
   V: { adv: 5, prims: [...slab(), wedge([-OUT, -OUT], [2.125, -OUT], [-OUT, 4.5]), wedge([CAP + OUT, -OUT], [2.875, -OUT], [CAP + OUT, 4.5]), wedge([1.5, 5.25], [3.5, 5.25], [2.5, 2.25])] },
@@ -118,10 +120,10 @@ export const geoLatin: Alphabet = {
 
 export const geoCyrillic: Alphabet = {
   А: alias("A"),
-  Б: { adv: 5, prims: [sq(0, 1), sq(1, 1, "h"), sq(0, 0), bowl(1, 0, ["tr", "br"]), fromRight(3, 3), eye(C, 1.25)] },
+  Б: { adv: 5, prims: [sq(0, 1), sq(1, 1, "h"), sq(0, 0), bowl(1, 0, ["tr", "br"]), fromRight(3, C), eye(C + H, H)] },
   В: alias("B"),
-  Г: { adv: 5, prims: [...slab("v", "h", "v", "v"), gap(C, -OUT, CAP + OUT, 3, [R, 0, 0, 0])] },
-  Д: { adv: 5, prims: [...slab(), ...roof(), eye(C, 3), tail(0), tail(CAP - H)] },
+  Г: { adv: 5, prims: [...slab("v", "h", "v", "v"), gap(C, -OUT, CAP + OUT, 3)] },
+  Д: { adv: 5, prims: [...slab(), ...roof(), eye(C, 3), tail(0), tail(CAP - TAIL)] },
   Е: alias("E"),
   Ё: { base: "E", prims: [dot(1.5, 5.75), dot(3.5, 5.75)] },
   Ж: {
@@ -138,7 +140,8 @@ export const geoCyrillic: Alphabet = {
   },
   З: { adv: 5, prims: [sq(0, 1, "h"), bowl(1, 1, ["tr", "br"]), sq(0, 0, "h"), bowl(1, 0, ["tr", "br"]), fromLeft(3.5, 2.5), fromLeft(1.5, 2.5)] },
   И: { adv: 5, prims: [...slab(), wedge([3.75, 5.25], [1.5, 5.25], [1.5, 3]), wedge([3.5, -0.25], [1.25, -0.25], [3.5, 2])] },
-  Й: { base: "И", prims: [bar(1.5, 5.5, 3.5, 6.25, [0, 0, 0.75, 0.75])] },
+  // The breve is a half disc hanging over the letter.
+  Й: { base: "И", prims: [{ kind: "sector", c: [C, 6.25], r: 1, a0: 180, a1: 360, dir: "arc" } satisfies SectorDef] },
   К: alias("K"),
   Л: { adv: 5, prims: [...slab(), ...roof(), fromBottom(C, 3)] },
   М: alias("M"),
@@ -150,21 +153,21 @@ export const geoCyrillic: Alphabet = {
   Т: alias("T"),
   У: alias("Y"),
   // A wide disc with two pupils: the stem is what stays between them.
-  Ф: { adv: 7.5, prims: [cell(0, 1, ["tl"]), sq(1, 1), cell(2, 1, ["tr"]), cell(0, 0, ["bl"]), sq(1, 0), cell(2, 0, ["br"]), eye(2, C, 0.75), eye(5.5, C, 0.75)] },
+  Ф: { adv: 7.5, prims: [cell(0, 1, ["tl"]), sq(1, 1), cell(2, 1, ["tr"]), cell(0, 0, ["bl"]), sq(1, 0), cell(2, 0, ["br"]), eye(2, C, 1), eye(5.5, C, 1)] },
   Х: alias("X"),
-  Ц: { adv: 5, prims: [...slab(), fromTop(C, 1.5), tail(CAP - H)] },
-  Ч: { adv: 5, prims: [...slab(), gap(-OUT, -OUT, 3, 2, [0, R, 0, 0]), fromTop(C, 3.5)] },
+  Ц: { adv: 5, prims: [...slab(), fromTop(C, 1.5), tail(CAP - TAIL)] },
+  Ч: { adv: 5, prims: [...slab(), gap(-OUT, -OUT, 3, 2), fromTop(C, 3.5)] },
   Ш: { adv: 7.5, prims: [...wide(), fromTop(C, 1.5), fromTop(2 * C, 1.5)] },
-  Щ: { adv: 7.5, prims: [...wide(), fromTop(C, 1.5), fromTop(2 * C, 1.5), tail(3 * C - H)] },
-  Ъ: { adv: 7.5, prims: [sq(0, 1, "h"), sq(1, 1), sq(1, 0), bowl(2, 0, ["tr", "br"]), eye(2 * C, 1.25), gap(-OUT, C - OUT, C, 3)] },
+  Щ: { adv: 7.5, prims: [...wide(), fromTop(C, 1.5), fromTop(2 * C, 1.5), tail(3 * C - TAIL)] },
+  Ъ: { adv: 7.5, prims: [sq(0, 1, "h"), sq(1, 1), sq(1, 0), bowl(2, 0, ["tr", "br"]), eye(2 * C + H, H), gap(-OUT, C - OUT, C, 3)] },
   // Ь and a separate stem.
-  Ы: { adv: 7.5, prims: [sq(0, 1), sq(0, 0), bowl(1, 0, ["tr", "br"]), eye(C, 1.25), stem(5.5, 0, 7.5, 5)] },
-  Ь: { adv: 5, prims: [sq(0, 1), sq(0, 0), bowl(1, 0, ["tr", "br"]), eye(C, 1.25)] },
+  Ы: { adv: 7.5, prims: [sq(0, 1), sq(0, 0), bowl(1, 0, ["tr", "br"]), eye(C + H, H), stem(5.5, 0, 7.5, 5)] },
+  Ь: { adv: 5, prims: [sq(0, 1), sq(0, 0), bowl(1, 0, ["tr", "br"]), eye(C + H, H)] },
   // C turned over, with a tongue left in the shadow.
   Э: { adv: 5, prims: [...disc(), eye(1.125, C, MOON), bar(1.5, 2, 3.5, 3, [R, 0, 0, R])] },
   // Stem and ring joined by a bridge.
   Ю: { adv: 7.5, prims: [sq(0, 1), sq(0, 0), ...disc(1), eye(2 * C, C, 1), bar(2, 2, 3.5, 3)] },
-  Я: { adv: 5, prims: [bowl(0, 1, ["tl", "bl"]), sq(1, 1), sq(0, 0), sq(1, 0), eye(C, 3.75), fromBottom(C, 1), wedge([1.25, 2.5], [-0.25, 2.5], [-0.25, 1])] },
+  Я: { adv: 5, prims: [bowl(0, 1, ["tl", "bl"]), sq(1, 1), sq(0, 0), sq(1, 0), eye(H, C + H), fromBottom(C, 1), wedge([1.25, 2.5], [-0.25, 2.5], [-0.25, 1])] },
 }
 
 /** Tiles turn and mirror about their own centre, so rosettes stay seamless. */
@@ -185,5 +188,5 @@ export const geoTileOrder = Object.keys(geoTiles).join("")
 
 export const geoAlphabet: Alphabet = { ...geoLatin, ...geoCyrillic, ...geoTiles }
 
-/** Look the set suggests: four lines per cell in the «lines» look. */
-export const geoLook = { stripes: 1.6, stripeFill: 0.5 }
+/** Look the set suggests: five lines per cell in the «lines» look, so shadows on the half-module grid cut whole lines. */
+export const geoLook = { stripes: 2, stripeFill: 0.5 }

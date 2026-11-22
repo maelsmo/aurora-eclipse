@@ -4,7 +4,7 @@ import { charset } from "../alphabet"
 import { defaultLibrary, resolveGlyphSet } from "../alphabet/sets"
 import { compileGlyph, glyphPrims } from "../compile"
 import { defaultAxes } from "../axes"
-import { arcCentre, isGeoPrim, onStripe, sdGlyph, sdRoundBox4, stripeCoord } from "../sdf"
+import { arcCentre, isGeoPrim, onStripe, sdGlyph, sdPrim, sdRoundBox4, stripeCoord } from "../sdf"
 import { primPoints, type CompiledGlyph, type CompiledPrim } from "../types"
 
 /** Connected components of the inside on a grid (4-neighbourhood). */
@@ -154,7 +154,7 @@ describe("geometric set", () => {
       for (let y = g.box.y0 - 0.2; y < g.box.y1 + 0.2; y += 0.11)
         for (let x = g.box.x0 - 0.2; x < g.box.x1 + 0.2; x += 0.11) {
           if (sdGlyph(g, x, y) >= -1e-3) continue
-          const inTile = pos.some((t) => sdRoundBox4(x, y, (t as { c: number[] }).c[0], (t as { c: number[] }).c[1], (t as { h: number[] }).h[0], (t as { h: number[] }).h[1], (t as { r: number[] }).r) <= 1e-6)
+          const inTile = pos.some((t) => sdPrim(t, x, y) <= 1e-6)
           if (!inTile) throw new Error(`${c}: ink outside the tiles at ${x.toFixed(2)}, ${y.toFixed(2)}`)
         }
     }

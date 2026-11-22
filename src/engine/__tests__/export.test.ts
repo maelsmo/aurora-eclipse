@@ -163,9 +163,10 @@ describe("svg placement and native elements", () => {
 
   it("draws geometric lines as centre-line strokes with true arcs", async () => {
     const { makeScene, defaultLook } = await import("../scene")
-    const s = makeScene({ set: "geo", layers: [makeLayer("O", { set: "geo" })], look: { ...defaultLook, mode: "lines", stripes: 1.6, stripeFill: 0.5 } })
+    const s = makeScene({ set: "geo", layers: [makeLayer("O", { set: "geo" })], look: { ...defaultLook, mode: "lines" } })
     const svg = frameToSVG(buildFrame(s, lib, 0, [1e4, 1e4]), s.material, { box })
-    expect(svg).toMatch(/fill="none" stroke-width="31.25"/)
+    // The set's own look: five lines to a cell, half of the period inked — 0.25 m at 1 m = 100 units.
+    expect(svg).toMatch(/fill="none" stroke-width="25"/)
     expect(svg).toMatch(/A\d/)
     expect(svg).toContain('stroke="#')
   })

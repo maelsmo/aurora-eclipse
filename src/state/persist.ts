@@ -2,6 +2,7 @@
 // and migrated (they are never written, so the v2 app keeps its data).
 import { KEYS, KEYS_V2, readJSON } from "@/engine/storage"
 import { geoSet, mainSet, type GlyphSet, type SetBase, type SetKind } from "@/engine/alphabet/sets"
+import { geoLook } from "@/engine/alphabet/geo"
 import { sanitizeLookPatch, sanitizeScene, type Scene } from "@/engine/scene"
 import type { GlyphDef } from "@/engine/types"
 import { sanitizePrim } from "@/engine/alphabet/sanitize"
@@ -40,6 +41,8 @@ export function sanitizeSet(raw: unknown): GlyphSet | null {
   const set: GlyphSet = { id: raw.id.slice(0, 64), name: raw.name.slice(0, 64) || "Сет", kind, base, glyphs: sanitizeGlyphs(raw.glyphs), updated: Number(raw.updated) || Date.now() }
   const look = sanitizeLookPatch(raw.look)
   if (Object.keys(look).length) set.look = look
+  // The built-in geometric set drew four lines to a cell before it was redrawn; its shadows now sit on a grid of five.
+  if (set.id === "geo" && set.base === "geo" && set.look?.stripes === 1.6) set.look = { ...set.look, stripes: geoLook.stripes }
   return set
 }
 
