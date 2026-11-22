@@ -29,6 +29,18 @@ if (import.meta.env.DEV) {
     })
 }
 
+// ?preset=<id> opens a starter scene or pattern: links to live examples. The scene it replaces
+// stays one undo away, and the address is cleaned so a reload keeps the edits.
+const wanted = new URLSearchParams(location.search).get("preset")
+const linked = wanted ? [...presets.presets, ...presets.patternPresets].find((p) => p.id === wanted) : undefined
+if (linked) {
+  const st = useStore.getState()
+  st.setTab("studio")
+  st.replaceScene(linked.make())
+  st.select(null)
+  history.replaceState(null, "", location.pathname)
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
