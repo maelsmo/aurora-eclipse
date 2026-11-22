@@ -86,3 +86,43 @@ describe("physics", () => {
     expect(none.physics).toBeUndefined()
   })
 })
+
+describe("dragging bodies", () => {
+  it("a spring pulls a grabbed body to the pointer; released, it keeps moving", () => {
+    const s = scene({ gravity: 0, bounds: "none" }, 1)
+    const w = new PhysicsWorld(M)
+    const input = { pointer: null, locked: new Set<string>() }
+    const f0 = buildFrame(s, lib, 0, FAR)
+    w.sync(f0, s.physics!, s.artboard, input)
+    const id = f0.items[0].id
+    const start = w.placement(id)!
+    expect(w.grabAt(id, [start.x, start.y])).toBe(true)
+    const target: [number, number] = [start.x + 6, start.y + 2]
+    for (let i = 0; i < 90; i++) {
+      w.moveGrab(target)
+      w.sync(buildFrame(s, lib, i / 60, FAR), s.physics!, s.artboard, input)
+      w.step(1 / 60, s.physics!, s.artboard, input)
+    }
+    const held = w.placement(id)!
+    expect(Math.hypot(held.x - target[0], held.y - target[1])).toBeLessThan(0.5)
+    // A fling, then let go: the body keeps going.
+    for (let i = 0; i < 6; i++) {
+      w.moveGrab([target[0] + (i + 1) * 1.5, target[1]])
+      w.step(1 / 60, s.physics!, s.artboard, input)
+    }
+    w.releaseGrab()
+    const a = w.placement(id)!
+    w.step(1 / 60, s.physics!, s.artboard, input)
+    w.step(1 / 60, s.physics!, s.artboard, input)
+    expect(w.placement(id)!.x).toBeGreaterThan(a.x + 0.05)
+    expect(w.bodyCount).toBe(1)
+  })
+
+  it("static (locked) bodies cannot be grabbed", () => {
+    const s = scene({}, 1)
+    const w = new PhysicsWorld(M)
+    const f = buildFrame(s, lib, 0, FAR)
+    w.sync(f, s.physics!, s.artboard, { pointer: null, locked: new Set([s.layers[0].id]) })
+    expect(w.grabAt(f.items[0].id, [0, 0])).toBe(false)
+  })
+})

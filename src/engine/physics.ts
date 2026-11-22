@@ -70,6 +70,8 @@ export class PhysicsWorld {
   private wallKey = ""
   private acc = 0
   private tick = 0
+  /** Spring from the pointer to the body being dragged. */
+  private grab: { id: string; constraint: MatterNS.Constraint } | null = null
   /** Simulated time, seconds. */
   time = 0
 
@@ -84,8 +86,52 @@ export class PhysicsWorld {
     return this.entries.size
   }
 
+  /**
+   * Starts dragging the body of an item from a world point: a spring pulls
+   * that point of the body to the pointer. Static bodies cannot be grabbed.
+   */
+  grabAt(id: string, world: [number, number]): boolean {
+    this.releaseGrab()
+    const e = this.entries.get(id)
+    if (!e || e.static) return false
+    const { Constraint, Composite } = this.M
+    const p = toM(world[0], world[1])
+    // pointB is the grab offset at the body's current angle; matter turns it with the body.
+    const constraint = Constraint.create({
+      pointA: p,
+      bodyB: e.body,
+      pointB: { x: p.x - e.body.position.x, y: p.y - e.body.position.y },
+      stiffness: 0.2,
+      damping: 0.05,
+      length: 0,
+    })
+    Composite.add(this.engine.world, constraint)
+    this.grab = { id, constraint }
+    return true
+  }
+
+  /** Moves the dragging spring's pointer end. */
+  moveGrab(world: [number, number]) {
+    if (!this.grab) return
+    const p = toM(world[0], world[1])
+    this.grab.constraint.pointA = p
+  }
+
+  /** Lets the body go: it keeps the velocity it has. */
+  releaseGrab() {
+    if (!this.grab) return
+    this.M.Composite.remove(this.engine.world, this.grab.constraint)
+    this.grab = null
+  }
+
+  /** Id of the item being dragged, if any. */
+  get grabbed() {
+    return this.grab?.id ?? null
+  }
+
   /** Forgets every body: the next sync starts from the frame as built. */
   reset() {
+    this.releaseGrab()
     const { Composite } = this.M
     for (const e of this.entries.values()) Composite.remove(this.engine.world, e.body)
     this.entries.clear()
@@ -163,6 +209,7 @@ export class PhysicsWorld {
     }
     for (const [id, e] of this.entries)
       if (e.seen !== this.tick) {
+        if (this.grab?.id === id) this.releaseGrab()
         Composite.remove(this.engine.world, e.body)
         this.entries.delete(id)
       }

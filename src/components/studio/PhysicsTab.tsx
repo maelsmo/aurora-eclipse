@@ -88,7 +88,7 @@ export function PhysicsTab() {
     <>
       <Section title="Физика" action={<Switch checked={physics.enabled} onCheckedChange={(v) => set({ enabled: v })} aria-label="Физика включена" />}>
         <Hint>
-          Тел в мире: {bodies}. Любая правка объектов запускает симуляцию заново; пауза её замораживает. Объекты с замком — неподвижные опоры.
+          Тел в мире: {bodies}. Пока симуляция идёт, тела можно тянуть мышью — сцена при этом не меняется. На паузе перетаскивание правит слои, а любая правка объектов запускает симуляцию заново. Объекты с замком — неподвижные опоры.
         </Hint>
         <div className="grid grid-cols-2 gap-2">
           <Button variant="outline" size="sm" onClick={() => runtime.resetPhysics()}>

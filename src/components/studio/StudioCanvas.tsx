@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { GlyphRenderer, type View } from "@/engine/gpu/renderer"
 import { rasterize } from "@/engine/cpu"
-import { buildFrame, frameBounds, frameLayers, layerToWorld, type Frame } from "@/engine/frame"
+import { buildFrame, pickItem, frameBounds, frameLayers, layerToWorld, type Frame } from "@/engine/frame"
 import { fitView, sceneFrame } from "@/engine/view"
 import { CAP, snap } from "@/engine/grid"
 import { childrenOf, parentXf, xfApply, xfInvert, type Layer, type Scene } from "@/engine/scene"
@@ -186,6 +186,8 @@ type Drag =
   | { kind: "rotate"; starts: NodeStart[]; pivot: Vec; from: Vec }
   | { kind: "resize"; start: NodeStart; handle: "w+" | "w-" | "h+" | "h-"; from: Vec }
   | { kind: "marquee"; from: Vec; to: Vec; base: string[]; additive: boolean }
+  /** Live physics: a spring drags a body; the scene itself is not edited. */
+  | { kind: "body" }
 
 /** Point inside a convex quad (world). */
 function inQuad(q: Vec[], p: Vec) {
@@ -462,6 +464,18 @@ export function StudioCanvas() {
     const frame = runtime.frame
     const leaf = frame ? pickLeaf(frame, st.scene.layers, w[0], w[1]) : null
     const sel = selectedIds(st)
+    // While physics runs, a press on an object grabs its body (paused, it edits the layers).
+    const world = runtime.physics
+    if (st.playing && st.scene.physics?.enabled && world?.bodyCount && frame && leaf && !e.shiftKey) {
+      const item = pickItem(frame, w[0], w[1])
+      if (item && world.grabAt(item, w)) {
+        const target = clickTarget(st.scene.layers, leaf, sel, e.metaKey || e.ctrlKey)
+        if (!sel.includes(target)) st.select(target)
+        drag.current = { kind: "body" }
+        setCursor("grabbing")
+        return
+      }
+    }
     // A press inside the current selection box drags the selection.
     if (g && inQuad(g.quad, w) && !e.shiftKey && !(e.metaKey || e.ctrlKey) && (!leaf || g.ids.includes(clickTarget(st.scene.layers, leaf, sel, false)) || sel.length > 1)) {
       startMove(w)
@@ -488,7 +502,10 @@ export function StudioCanvas() {
     const st = useStore.getState()
     const d = drag.current
     const snapping = st.snap && !e.altKey
-    if (d?.kind === "move") {
+    if (d?.kind === "body") {
+      runtime.physics?.moveGrab(w)
+      schedule.current()
+    } else if (d?.kind === "move") {
       let dx = w[0] - d.from[0],
         dy = w[1] - d.from[1]
       if (!d.moved && Math.hypot(dx, dy) * zoom.current < 3) return
@@ -560,6 +577,7 @@ export function StudioCanvas() {
   function onPointerUp() {
     const d = drag.current
     if (d?.kind === "marquee" && Math.hypot(d.to[0] - d.from[0], d.to[1] - d.from[1]) * zoom.current < 3 && !d.additive) useStore.getState().select(null)
+    if (d?.kind === "body") runtime.physics?.releaseGrab()
     drag.current = null
     runtime.pointerDown = false
     setCursor(space.current ? "grab" : "default")

@@ -444,6 +444,17 @@ export function pickLayer(f: Frame, x: number, y: number, slack = 0): string | n
   return null
 }
 
+/** Id of the topmost draw item (a clone keeps its suffix) whose shape contains the world point. */
+export function pickItem(f: Frame, x: number, y: number, slack = 0): string | null {
+  const [wx, wy] = warpPoint(f, x, y)
+  for (let k = f.items.length - 1; k >= 0; k--) {
+    const it = f.items[k]
+    if (it.mask && layerField(it.mask, wx, wy) > slack) continue
+    if (it.layers.some((l) => layerField(l, wx, wy) < slack)) return it.id
+  }
+  return null
+}
+
 /** Distance from a world point to the nearest shape of the frame (no operators). */
 export function nearestDistance(f: Frame, x: number, y: number) {
   const [wx, wy] = warpPoint(f, x, y)
