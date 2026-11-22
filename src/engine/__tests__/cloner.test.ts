@@ -261,3 +261,37 @@ describe("variations of patterns", () => {
     }
   })
 })
+
+describe("pattern presets fit their artboards", () => {
+  it("content (masked content by its mask) lies inside the artboard", async () => {
+    const { patternPresets } = await import("../presets")
+    const { layerBounds } = await import("../frame")
+    const out: string[] = []
+    for (const p of patternPresets) {
+      const s = p.make()
+      const a = s.artboard
+      const f = buildFrame(s, lib, 0, FAR)
+      let x0 = Infinity,
+        y0 = Infinity,
+        x1 = -Infinity,
+        y1 = -Infinity
+      for (const it of f.items)
+        for (const l of it.layers) {
+          let b = layerBounds(l)
+          if (it.mask) {
+            const m = layerBounds(it.mask)
+            b = { x0: Math.max(b.x0, m.x0), y0: Math.max(b.y0, m.y0), x1: Math.min(b.x1, m.x1), y1: Math.min(b.y1, m.y1) }
+            if (b.x0 >= b.x1 || b.y0 >= b.y1) continue
+          }
+          x0 = Math.min(x0, b.x0)
+          y0 = Math.min(y0, b.y0)
+          x1 = Math.max(x1, b.x1)
+          y1 = Math.max(y1, b.y1)
+        }
+      const e = 1e-6
+      if (x0 < a.x - a.w / 2 - e || x1 > a.x + a.w / 2 + e || y0 < a.y - a.h / 2 - e || y1 > a.y + a.h / 2 + e)
+        out.push(`${p.id}: content ${x0.toFixed(2)}…${x1.toFixed(2)} × ${y0.toFixed(2)}…${y1.toFixed(2)}, artboard ${a.w}×${a.h}`)
+    }
+    expect(out).toEqual([])
+  })
+})

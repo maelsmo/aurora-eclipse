@@ -95,7 +95,8 @@ export function Constructor() {
         <GlyphList />
       </div>
       <div className="order-1 flex min-h-[60dvh] min-w-0 flex-1 flex-col gap-2 lg:order-2 lg:min-h-0">
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card p-1.5">
+        {/* Labels show only when the toolbar itself is wide enough for all of them (container query). */}
+        <div className="@container flex flex-wrap items-center gap-2 rounded-xl border bg-card p-1.5">
           <ToggleGroup
             spacing={1}
             size="sm"
@@ -103,12 +104,13 @@ export function Constructor() {
             onValueChange={(v) => v[0] && setTool(v[0] as Tool)}
             aria-label="Инструмент"
             disabled={specimen}
+            className="flex-wrap"
           >
             {tools.map(({ value, label, hint, Icon }) => (
               <Tooltip key={value}>
                 <TooltipTrigger render={<ToggleGroupItem value={value} aria-label={label} />}>
                   <Icon />
-                  <span className="hidden xl:inline">{label}</span>
+                  <span className="hidden @[72rem]:inline">{label}</span>
                 </TooltipTrigger>
                 <TooltipContent>{hint}</TooltipContent>
               </Tooltip>

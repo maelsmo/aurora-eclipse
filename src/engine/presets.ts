@@ -1,6 +1,8 @@
 // Starting compositions and contexts (material + palette over any composition).
 import { defaultAlphabet } from "./alphabet"
 import { geoAlphabet, geoLook } from "./alphabet/geo"
+import { defaultLibrary } from "./alphabet/sets"
+import { buildFrame, layerBounds } from "./frame"
 import { defaultAxes } from "./axes"
 import {
   defaultArtboard,
@@ -216,11 +218,41 @@ function cloner(c: Partial<Cloner>, children: Layer[], over: Partial<Layer> = {}
 const tile = (char: string, color = "#161616") => makeLayer(char, { set: "geo", color })
 const frame = { ...defaultArtboard, enabled: true }
 
+/**
+ * Grows the artboard (keeping its proportions) and centres it so the
+ * content fits with `pad` modules of air; masked content counts by its mask.
+ */
+function fitArtboard(scene: Scene, pad = 2): Scene {
+  const f = buildFrame(scene, defaultLibrary(), 0, [1e4, 1e4])
+  let x0 = Infinity,
+    y0 = Infinity,
+    x1 = -Infinity,
+    y1 = -Infinity
+  for (const it of f.items)
+    for (const l of it.layers) {
+      let b = layerBounds(l)
+      if (it.mask) {
+        const m = layerBounds(it.mask)
+        b = { x0: Math.max(b.x0, m.x0), y0: Math.max(b.y0, m.y0), x1: Math.min(b.x1, m.x1), y1: Math.min(b.y1, m.y1) }
+        if (b.x0 >= b.x1 || b.y0 >= b.y1) continue
+      }
+      x0 = Math.min(x0, b.x0)
+      y0 = Math.min(y0, b.y0)
+      x1 = Math.max(x1, b.x1)
+      y1 = Math.max(y1, b.y1)
+    }
+  if (!Number.isFinite(x0)) return scene
+  const a = scene.artboard
+  const k = Math.max(1, (x1 - x0 + 2 * pad) / a.w, (y1 - y0 + 2 * pad) / a.h)
+  const r = (v: number) => Math.ceil(v * 2) / 2
+  return { ...scene, artboard: { ...a, enabled: true, w: r(a.w * k), h: r(a.h * k), x: (x0 + x1) / 2, y: (y0 + y1) / 2 } }
+}
+
 export const patternPresets: Preset[] = [
   {
     id: "geo-lines",
     name: "Геометрия · линии",
-    make: () => makeScene({ set: "geo", layers: geoWord("ЛИНИИ\nAURORA"), look: { ...defaultLook, ...geoLook, mode: "lines" }, artboard: frame }),
+    make: () => fitArtboard(makeScene({ set: "geo", layers: geoWord("ЛИНИИ\nAURORA"), look: { ...defaultLook, ...geoLook, mode: "lines" }, artboard: frame })),
   },
   {
     id: "rosette",
@@ -246,7 +278,7 @@ export const patternPresets: Preset[] = [
     id: "tile-wave",
     name: "Волна плиток",
     make: () =>
-      makeScene({
+      fitArtboard(makeScene({
         set: "geo",
         layers: cloner(
           {
@@ -259,12 +291,12 @@ export const patternPresets: Preset[] = [
           [tile("◠")],
         ),
         artboard: { ...frame, w: 36, h: 21 },
-      }),
+      })),
   },
   {
     id: "mosaic",
     name: "Мозаика",
-    make: () => makeScene({ set: "geo", layers: geoWord("МОЗАИКА", { color: "#1E8C6E" }), look: { ...defaultLook, inset: 0.18 }, artboard: frame }),
+    make: () => fitArtboard(makeScene({ set: "geo", layers: geoWord("МОЗАИКА", { color: "#1E8C6E" }), look: { ...defaultLook, inset: 0.18 }, artboard: frame })),
   },
   {
     id: "fall",
@@ -272,7 +304,7 @@ export const patternPresets: Preset[] = [
     make: () =>
       makeScene({
         set: "geo",
-        layers: geoWord("ПАДАЮ", { color: "#161616" }).map((l, i) => ({ ...l, y: 4 + (i % 2) * 3, rotation: (i - 2) * 9 })),
+        layers: geoWord("ПАДАЮ", { color: "#161616" }).map((l, i) => ({ ...l, y: 2.5 + (i % 2) * 2.5, rotation: (i - 2) * 9 })),
         physics: { ...defaultPhysics, bounce: 0.45 },
         artboard: frame,
       }),

@@ -16,12 +16,12 @@ import { even, mp4Supported } from "@/engine/export/video"
 import { renderPNG } from "@/engine/gpu/thumbs"
 import type { Frame } from "@/engine/frame"
 import { fitView } from "@/engine/view"
-import { exportBox, exportFrame, exportVideo, sizeFor } from "@/state/exporting"
+import { exportBox, exportDefaults, exportFrame, exportVideo, sizeFor } from "@/state/exporting"
 import { download } from "@/engine/storage"
 import type { Look, Scene } from "@/engine/scene"
 import { sceneChars } from "./labels"
 import { useStore } from "@/state/store"
-import { runtime } from "@/state/runtime"
+import { liveScene, runtime } from "@/state/runtime"
 
 export function SaveDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const scene = useStore((s) => s.scene)
@@ -103,10 +103,12 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   useEffect(() => {
     if (!open) return
     const st = useStore.getState()
-    const scene = runtime.effective ?? st.scene
-    setFrozen({ scene, time: runtime.time, frame: exportFrame(scene, st.library, runtime.time) })
-    setUseArtboard(st.scene.artboard.enabled)
-    setTransparent(st.scene.material.transparent || format === "svg")
+    // The live scene only if it was resolved from the current one (the canvas may not have drawn yet).
+    const scene = liveScene(st.scene)
+    setFrozen({ scene, time: runtime.time, frame: exportFrame(scene, st.library, runtime.time, st.scene) })
+    const d = exportDefaults(st.scene)
+    setUseArtboard(d.useArtboard)
+    setTransparent(d.transparent)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 

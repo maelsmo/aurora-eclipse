@@ -226,3 +226,16 @@ describe("masks and fixed modules in export", () => {
     expect(svg).toContain("clip-path=")
   })
 })
+
+describe("export dialog defaults", () => {
+  it("keep the scene background for every format", async () => {
+    const { exportDefaults } = await import("../../state/exporting")
+    const { patternPresets } = await import("../presets")
+    const { makeScene } = await import("../scene")
+    const rosette = patternPresets.find((p) => p.id === "rosette")!.make()
+    expect(exportDefaults(rosette)).toEqual({ transparent: false, useArtboard: true })
+    const clear = makeScene()
+    clear.material = { ...clear.material, transparent: true }
+    expect(exportDefaults(clear).transparent).toBe(true)
+  })
+})

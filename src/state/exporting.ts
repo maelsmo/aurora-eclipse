@@ -11,10 +11,22 @@ import { Runtime, runtime } from "./runtime"
 
 const FAR: [number, number] = [1e4, 1e4]
 
-/** The frame to export: the one on screen when physics moves the objects, the scene's own otherwise. */
-export function exportFrame(scene: Scene, lib: Library, time: number): Frame {
-  if (scene.physics?.enabled && runtime.frame && runtime.physics?.bodyCount) return runtime.frame
+/**
+ * The frame to export: the one on screen when physics moves the objects
+ * (and that frame belongs to this scene), the scene's own otherwise.
+ */
+export function exportFrame(scene: Scene, lib: Library, time: number, source?: Scene): Frame {
+  if (scene.physics?.enabled && runtime.frame && runtime.physics?.bodyCount && (!source || runtime.source === source)) return runtime.frame
   return sceneFrame(scene, lib, time)
+}
+
+/**
+ * Starting options of the export dialog: the scene's own background stays
+ * (images are often used as backgrounds elsewhere), the artboard frames the
+ * file when it is shown.
+ */
+export function exportDefaults(scene: Scene) {
+  return { transparent: scene.material.transparent, useArtboard: scene.artboard.enabled }
 }
 
 /** World box of the file: the artboard, or the content with the reach of its effects. */

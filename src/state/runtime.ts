@@ -20,6 +20,8 @@ export class Runtime {
   routes: RouteState = new Map()
   signals: Signals = emptySignals()
   effective: Scene | null = null
+  /** The stored scene the effective scene (and the last frame) was resolved from. */
+  source: Scene | null = null
   /** Frame of the last draw (picking uses it so clicks hit what is visible). */
   frame: Frame | null = null
   private listeners = new Set<() => void>()
@@ -105,6 +107,7 @@ export class Runtime {
     let eff = applyRoutes(scene, s, this.routes)
     eff = applyMotion(eff, this.time, playing ? dt : 0, p, this.motion)
     this.effective = eff
+    this.source = scene
     this.listeners.forEach((f) => f())
     return eff
   }
@@ -130,6 +133,11 @@ function lockedIds(layers: Layer[]) {
 }
 
 export const runtime = new Runtime()
+
+/** The live (modulated) scene when it is current for `scene`, else `scene` itself. */
+export function liveScene(scene: Scene): Scene {
+  return runtime.effective && runtime.source === scene ? runtime.effective : scene
+}
 
 /** Does the scene need continuous frames? */
 export function isAnimated(scene: Scene, pointerOn: boolean, micOn: boolean) {
