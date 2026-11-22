@@ -66,6 +66,7 @@ import {
   isGroup,
   layoutText,
   chunkByWords,
+  groupNodes,
   groupText,
   addIssue,
   CLONE_LIMITS,
@@ -158,6 +159,8 @@ function TextForm({ onDone }: { onDone: () => void }) {
   const [set, setSet] = useState(scene.set)
   const { setScene, select } = useStore.getState()
 
+  const shapes = library.sets[set]?.set.kind === "shapes"
+
   function submit(e: React.FormEvent) {
     e.preventDefault()
     const value = text.trim()
@@ -168,16 +171,19 @@ function TextForm({ onDone }: { onDone: () => void }) {
     const color = scene.layers.find((l) => l.type === "letter")?.color ?? inks[0]
     const letters = layoutText(value, abc, scene.axes, scene.tracking, { op, color, ...(set !== scene.set ? { set } : {}) }, entry?.version ?? 0)
     if (!letters.length) return void toast.error("В сете нет этих знаков.")
-    // A merge holds at most LIMITS.mergeChildren letters: longer text becomes several merges split between words.
-    const chunks = chunkByWords(value, abc, LIMITS.mergeChildren)
+    // Geometric letters keep their modules (lines, mosaic, cuts) only drawn one by one: their text is
+    // an ordinary group. Stroke letters fuse into merges of at most LIMITS.mergeChildren, split between words.
+    const chunks = shapes ? [] : chunkByWords(value, abc, LIMITS.mergeChildren)
     const { parent, index } = insertionPoint(scene, selected)
     const host = parent ? scene.layers.find((l) => l.id === parent) : undefined
     const p = isGroup(host) && host.mode === "merge" ? host.parent : parent
-    const issue = addIssue(scene.layers, p, 0, letters.length + chunks.length + (chunks.length > 1 ? 1 : 0))
+    const issue = addIssue(scene.layers, p, 0, letters.length + (shapes ? 1 : chunks.length + (chunks.length > 1 ? 1 : 0)))
     if (issue) return void toast.error(issue)
     // New text lands in the middle of the view; the view widens when the text does not fit.
     const placed = placeInView(letters)
-    const res = groupText(scene, placed, chunks, value.slice(0, 24))
+    const res = shapes
+      ? groupNodes({ ...scene, layers: [...scene.layers, ...placed] }, placed.map((l) => l.id), "stack", { name: value.slice(0, 24) })
+      : groupText(scene, placed, chunks, value.slice(0, 24))
     setScene(res.id ? moveNode(res.scene, res.id, p, p === parent ? index : childrenOf(res.scene.layers, p).length) : res.scene)
     if (res.id) select(res.id)
     const xs = placed.map((l) => l.x),
@@ -191,7 +197,7 @@ function TextForm({ onDone }: { onDone: () => void }) {
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
       <label htmlFor="type-text" className="text-sm font-medium">
-        Текст сплавом
+        {shapes ? "Текст" : "Текст сплавом"}
       </label>
       <Input id="type-text" autoFocus value={text} maxLength={60} placeholder="Слово или фраза" onChange={(e) => setText(e.target.value)} />
       <div className="grid grid-cols-2 gap-2">
@@ -207,7 +213,7 @@ function TextForm({ onDone }: { onDone: () => void }) {
             ))}
           </SelectContent>
         </Select>
-        <Select items={opItems} value={op} onValueChange={(v) => v && setOp(v as Op)}>
+        <Select items={opItems} value={op} onValueChange={(v) => v && setOp(v as Op)} disabled={shapes}>
           <SelectTrigger size="sm" aria-label="Оператор между буквами">
             <SelectValue />
           </SelectTrigger>
@@ -224,6 +230,7 @@ function TextForm({ onDone }: { onDone: () => void }) {
           </SelectContent>
         </Select>
       </div>
+      {shapes && <p className="text-xs text-muted-foreground">Буквы геометрического сета ставятся отдельно, без сплава: так у них работают линии модулей, мозаика и срезы.</p>}
       <ParamSlider def={sceneParams.tracking} value={scene.tracking} onChange={(v) => setScene((s) => ({ ...s, tracking: v }), "tracking")} />
       <Button type="submit" disabled={!text.trim()}>
         <Type data-icon="inline-start" />
@@ -461,7 +468,7 @@ function LayerRow({
               onClick={(e) => {
                 e.stopPropagation()
                 if (e.altKey) setCollapsedDeep(l.id, !l.collapsed)
-                else updateLayer(l.id, { collapsed: !l.collapsed })
+                else useStore.getState().updateLayersQuiet([{ id: l.id, patch: { collapsed: !l.collapsed || undefined } }])
               }}
             >
               {l.collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
@@ -708,7 +715,7 @@ export function LayersPanel() {
       if (rows[j]) pick(rows[j].node.id, { shiftKey: e.shiftKey, metaKey: false, ctrlKey: false })
     } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && isGroup(primary)) {
       e.preventDefault()
-      useStore.getState().updateLayer(primary.id, { collapsed: e.key === "ArrowLeft" })
+      useStore.getState().updateLayersQuiet([{ id: primary.id, patch: { collapsed: e.key === "ArrowLeft" || undefined } }])
     } else if (e.key === "F2" || (e.key === "Enter" && primary)) {
       e.preventDefault()
       if (primary) set({ renaming: primary.id })

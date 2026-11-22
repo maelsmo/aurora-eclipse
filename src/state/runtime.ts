@@ -36,6 +36,8 @@ export class Runtime {
   /** Rigid-body world of the live view (created when physics is first on). */
   physics: PhysicsWorld | null = null
   private physicsLayers: Layer[] | null = null
+  /** What of the objects the bodies depend on (geometry, placement, locks), as a string. */
+  private physicsGeometry = ""
   private physicsShape = ""
 
   /**
@@ -48,6 +50,7 @@ export class Runtime {
     if (!p?.enabled) {
       if (this.physics?.bodyCount) this.physics.reset()
       this.physicsLayers = null
+      this.physicsGeometry = ""
       return
     }
     const M = matterLoaded()
@@ -56,12 +59,20 @@ export class Runtime {
       return
     }
     const w = (this.physics ??= new PhysicsWorld(M))
-    // Bodies are rebuilt when the objects change, or the collision shape or the body limit does.
+    // Bodies are rebuilt when the objects' geometry or placement changes, or the collision shape or
+    // the body limit does — not when a group is folded, a layer renamed or recoloured.
     const shape = `${p.shape}|${p.maxBodies}`
-    if (source.layers !== this.physicsLayers || shape !== this.physicsShape) {
-      w.reset()
+    if (source.layers !== this.physicsLayers) {
       this.physicsLayers = source.layers
+      const geometry = physicsGeometry(source.layers)
+      if (geometry !== this.physicsGeometry) {
+        this.physicsGeometry = geometry
+        w.reset()
+      }
+    }
+    if (shape !== this.physicsShape) {
       this.physicsShape = shape
+      w.reset()
     }
     const input = { pointer: this.pointerWorld, locked: lockedIds(source.layers) }
     w.sync(frame, p, eff.artboard, input)
@@ -123,6 +134,17 @@ export class Runtime {
       this.listeners.delete(f)
     }
   }
+}
+
+/** The parts of the layers bodies depend on: everything but names, folding, colours and looks. */
+function physicsGeometry(layers: Layer[]) {
+  return JSON.stringify(
+    layers.map((l) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { name, collapsed, color, look, ...rest } = l as Layer & { collapsed?: boolean }
+      return rest
+    }),
+  )
 }
 
 /** Locked nodes and everything inside locked groups. */

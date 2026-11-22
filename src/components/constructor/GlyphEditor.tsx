@@ -100,11 +100,12 @@ export function GlyphEditor({
     r.resize(size.w * dpr, size.h * dpr)
     const entry = library.sets[editingSet]
     const g = compileGlyph(editing, alphabet, axes, entry?.version ?? 0)
-    const ax = (g.box.x0 + g.box.x1) / 2
+    // The layer sits at the glyph's anchor so glyph coordinates equal world ones (tiles turn about their centre).
+    const [ax, ay] = g.anchor ?? [(g.box.x0 + g.box.x1) / 2, CAP / 2]
     const scene = makeScene({
       axes,
       set: editingSet,
-      layers: [makeLayer(editing, { x: ax, y: CAP / 2, color: "#C9C3EE" })],
+      layers: [makeLayer(editing, { x: ax, y: ay, color: "#C9C3EE" })],
     })
     const frame = buildFrame(scene, library, 0, [1e4, 1e4])
     const cx = bx0 + (size.w / 2 - offX) / s,

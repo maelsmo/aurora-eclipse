@@ -223,7 +223,7 @@ export function setCollapsedDeep(id: string | undefined, collapsed: boolean) {
   const s = st()
   const layers = s.scene.layers
   const targets = layers.filter((l) => isGroup(l) && (id === undefined || l.id === id || isDescendant(layers, l, id)))
-  if (targets.length) s.updateLayers(targets.map((g) => ({ id: g.id, patch: { collapsed: collapsed || undefined } })))
+  if (targets.length) s.updateLayersQuiet(targets.map((g) => ({ id: g.id, patch: { collapsed: collapsed || undefined } })))
 }
 
 /**

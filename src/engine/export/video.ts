@@ -14,7 +14,7 @@ export type VideoOptions = {
   fps: number
   seconds: number
   view: View
-  /** Bits per second (12–16 Mbit/s by default by size). */
+  /** Bits per second (by default 4–16 Mbit/s by frame area, see defaultBitrate). */
   bitrate?: number
   onProgress?: (p: number) => void
   signal?: AbortSignal
@@ -106,5 +106,8 @@ export async function encodeMP4(source: VideoFrameSource, opts: VideoOptions): P
     throw e
   } finally {
     renderer.dispose()
+    // Free this canvas's WebGL context now: repeated exports must not push the studio's out
+    // (browsers drop the oldest context past their limit).
+    canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext()
   }
 }

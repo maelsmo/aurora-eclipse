@@ -56,6 +56,8 @@ type Actions = {
   setScene: (u: SceneUpdate, key?: string) => void
   replaceScene: (s: Scene) => void
   updateLayer: (id: string, patch: Partial<Layer>, key?: string) => void
+  /** View-only changes of layers (folding groups): no undo step, the redo stack stays. */
+  updateLayersQuiet: (patches: { id: string; patch: Partial<Layer> }[]) => void
   updateLayers: (patches: { id: string; patch: Partial<Layer> }[], key?: string) => void
   select: (id: string | null, mode?: SelectMode) => void
   selectMany: (ids: string[]) => void
@@ -141,6 +143,12 @@ export const useStore = create<State & Actions>()((set, get) => {
       set({ selected: top ? [top.id] : [] })
     },
     updateLayer: (id, patch, key) => get().updateLayers([{ id, patch }], key),
+    updateLayersQuiet: (patches) => {
+      if (!patches.length) return
+      const byId = new Map(patches.map((p) => [p.id, p.patch]))
+      const scene = get().scene
+      set({ scene: { ...scene, layers: scene.layers.map((l) => (byId.has(l.id) ? ({ ...l, ...byId.get(l.id) } as Layer) : l)) } })
+    },
     updateLayers: (patches, key) => {
       if (!patches.length) return
       const byId = new Map(patches.map((p) => [p.id, p.patch]))

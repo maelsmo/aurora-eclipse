@@ -139,3 +139,25 @@ describe("dragging bodies", () => {
     expect(w.grabAt(f.items[0].id, [0, 0])).toBe(false)
   })
 })
+
+describe("what restarts the live simulation", () => {
+  it("folding, renaming and recolouring keep it going; moving an object restarts it", async () => {
+    const { Runtime } = await import("../../state/runtime")
+    const { loadMatter } = await import("../physics")
+    await loadMatter()
+    const rt = new Runtime()
+    const s = scene({}, 3)
+    const run = (sc: Scene, n: number) => {
+      for (let i = 0; i < n; i++) rt.physicsFrame(buildFrame(sc, lib, i / 60, FAR), sc, sc, 1 / 60, true)
+    }
+    run(s, 30)
+    const t = rt.physics!.time
+    expect(t).toBeGreaterThan(0.4)
+    const cosmetic = { ...s, layers: s.layers.map((l) => ({ ...l, name: "x", color: "#FF0000", collapsed: true })) }
+    run(cosmetic, 1)
+    expect(rt.physics!.time).toBeGreaterThan(t)
+    const moved = { ...cosmetic, layers: cosmetic.layers.map((l, i) => (i === 0 ? { ...l, x: l.x + 3 } : l)) }
+    run(moved, 1)
+    expect(rt.physics!.time).toBeLessThan(0.05)
+  })
+})
