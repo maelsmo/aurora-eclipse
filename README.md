@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://maelsmo.github.io/aurora_ecipse/">
+  <a href="https://maelsmo.github.io/aurora-eclipse/">
     <img src="docs/hero.png" width="100%" alt="AURORA ECLIPSE, набранное сетом «Геометрия»: верхняя строка заливкой, нижняя линиями, буква C — оранжевый серп">
   </a>
 </p>
@@ -8,7 +8,7 @@
 
 **Редактор узоров из букв.** Знаки собираются из модулей на общей сетке, а дальше работают как материал: их можно слить в один знак, размножить клонером в орнамент, уронить на пол с настоящей физикой и забрать результат вектором, растром или видео.
 
-**[Открыть в браузере →](https://maelsmo.github.io/aurora_ecipse/)**
+**[Открыть в браузере →](https://maelsmo.github.io/aurora-eclipse/)**
 
 Ставить ничего не нужно. Всё считается в вашем браузере, сцены и сеты хранятся в нём же, на сервер ничего не уходит.
 
@@ -22,19 +22,19 @@
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/gallery-eclipse-ae.png" alt="Знак AE: буква E уходит за A и огибает её с просветом"><br><b>Затмение</b> — один знак уходит за другой и огибает его с просветом.<br><a href="https://maelsmo.github.io/aurora_ecipse/?preset=eclipse-ae">Открыть</a></td>
-    <td width="33%"><img src="docs/gallery-orbit.png" alt="Две буквы O наложены друг на друга, их перекрытие стало просветом"><br><b>Орбита</b> — буква ходит вокруг соседки, а их перекрытие становится просветом.<br><a href="https://maelsmo.github.io/aurora_ecipse/?preset=orbit">Открыть</a></td>
-    <td width="33%"><img src="docs/gallery-wordmark.png" alt="Надпись AURORA ECLIPSE основным сетом"><br><b>Надпись</b> — основной сет: штрихи, дуги, спутники.<br><a href="https://maelsmo.github.io/aurora_ecipse/?preset=wordmark">Открыть</a></td>
+    <td width="33%"><img src="docs/gallery-eclipse-ae.png" alt="Знак AE: буква E уходит за A и огибает её с просветом"><br><b>Затмение</b> — один знак уходит за другой и огибает его с просветом.<br><a href="https://maelsmo.github.io/aurora-eclipse/?preset=eclipse-ae">Открыть</a></td>
+    <td width="33%"><img src="docs/gallery-orbit.png" alt="Две буквы O наложены друг на друга, их перекрытие стало просветом"><br><b>Орбита</b> — буква ходит вокруг соседки, а их перекрытие становится просветом.<br><a href="https://maelsmo.github.io/aurora-eclipse/?preset=orbit">Открыть</a></td>
+    <td width="33%"><img src="docs/gallery-wordmark.png" alt="Надпись AURORA ECLIPSE основным сетом"><br><b>Надпись</b> — основной сет: штрихи, дуги, спутники.<br><a href="https://maelsmo.github.io/aurora-eclipse/?preset=wordmark">Открыть</a></td>
   </tr>
   <tr>
-    <td><img src="docs/gallery-rosette.png" alt="Розетка из четвертей круга четырёх цветов, кольцами от центра"><br><b>Розетка</b> — одна плитка, клонер 8 × 8, цвета кольцами, поворот по четвертям.<br><a href="https://maelsmo.github.io/aurora_ecipse/?preset=rosette">Открыть</a></td>
-    <td><img src="docs/gallery-letter-mask.png" alt="Буква A, заполненная шахматным узором из плиток"><br><b>Буква из плиток</b> — знак работает маской для узора.<br><a href="https://maelsmo.github.io/aurora_ecipse/?preset=letter-mask">Открыть</a></td>
-    <td><img src="docs/gallery-tile-wave.png" alt="Поле сине-чёрных плиток, по которому идёт волна поворотов"><br><b>Волна плиток</b> — эффектор качает клоны во времени.<br><a href="https://maelsmo.github.io/aurora_ecipse/?preset=tile-wave">Открыть</a></td>
+    <td><img src="docs/gallery-rosette.png" alt="Розетка из четвертей круга четырёх цветов, кольцами от центра"><br><b>Розетка</b> — одна плитка, клонер 8 × 8, цвета кольцами, поворот по четвертям.<br><a href="https://maelsmo.github.io/aurora-eclipse/?preset=rosette">Открыть</a></td>
+    <td><img src="docs/gallery-letter-mask.png" alt="Буква A, заполненная шахматным узором из плиток"><br><b>Буква из плиток</b> — знак работает маской для узора.<br><a href="https://maelsmo.github.io/aurora-eclipse/?preset=letter-mask">Открыть</a></td>
+    <td><img src="docs/gallery-tile-wave.png" alt="Поле сине-чёрных плиток, по которому идёт волна поворотов"><br><b>Волна плиток</b> — эффектор качает клоны во времени.<br><a href="https://maelsmo.github.io/aurora-eclipse/?preset=tile-wave">Открыть</a></td>
   </tr>
   <tr>
-    <td><img src="docs/gallery-geo-lines.png" alt="Слова ЛИНИИ и AURORA, нарисованные пучками параллельных линий"><br><b>Линии</b> — те же буквы пучками параллельных линий.<br><a href="https://maelsmo.github.io/aurora_ecipse/?preset=geo-lines">Открыть</a></td>
-    <td><img src="docs/gallery-mosaic.png" alt="Слово МОЗАИКА, разрезанное зазорами на клетки"><br><b>Мозаика</b> — зазор раскрывает клетки, из которых сложена буква.<br><a href="https://maelsmo.github.io/aurora_ecipse/?preset=mosaic">Открыть</a></td>
-    <td><img src="docs/gallery-fall.png" alt="Буквы слова ПАДАЮ летят вниз и кувыркаются"><br><b>Падение</b> — буквы становятся твёрдыми телами.<br><a href="https://maelsmo.github.io/aurora_ecipse/?preset=fall">Открыть</a></td>
+    <td><img src="docs/gallery-geo-lines.png" alt="Слова ЛИНИИ и AURORA, нарисованные пучками параллельных линий"><br><b>Линии</b> — те же буквы пучками параллельных линий.<br><a href="https://maelsmo.github.io/aurora-eclipse/?preset=geo-lines">Открыть</a></td>
+    <td><img src="docs/gallery-mosaic.png" alt="Слово МОЗАИКА, разрезанное зазорами на клетки"><br><b>Мозаика</b> — зазор раскрывает клетки, из которых сложена буква.<br><a href="https://maelsmo.github.io/aurora-eclipse/?preset=mosaic">Открыть</a></td>
+    <td><img src="docs/gallery-fall.png" alt="Буквы слова ПАДАЮ летят вниз и кувыркаются"><br><b>Падение</b> — буквы становятся твёрдыми телами.<br><a href="https://maelsmo.github.io/aurora-eclipse/?preset=fall">Открыть</a></td>
   </tr>
 </table>
 
