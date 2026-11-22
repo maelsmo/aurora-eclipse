@@ -9,10 +9,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { GlyphRenderer, type View } from "@/engine/gpu/renderer"
 import { rasterize } from "@/engine/cpu"
-import { buildFrame, pickItem, frameBounds, frameLayers, layerToWorld, type Frame } from "@/engine/frame"
+import { buildFrame, nearestItem, pickItem, frameBounds, frameLayers, layerToWorld, type Frame } from "@/engine/frame"
 import { fitView, sceneFrame } from "@/engine/view"
 import { CAP, snap } from "@/engine/grid"
-import { childrenOf, parentXf, xfApply, xfInvert, type Layer, type Scene } from "@/engine/scene"
+import { childrenOf, isDescendant, parentXf, xfApply, xfInvert, type Layer, type Scene } from "@/engine/scene"
 import type { Vec } from "@/engine/types"
 import { selectedIds, useStore } from "@/state/store"
 import { runtime, isAnimated } from "@/state/runtime"
@@ -25,6 +25,7 @@ import {
   handlePoints,
   moveBy,
   nodeBounds,
+  PICK_SLACK,
   pickLeaf,
   resizeShape,
   rotateAround,
@@ -475,15 +476,31 @@ export function StudioCanvas() {
     const frame = runtime.frame
     const leaf = frame ? pickLeaf(frame, st.scene.layers, w[0], w[1]) : null
     const sel = selectedIds(st)
-    // While physics runs, a press on an object grabs its body (paused, it edits the layers).
+    // While physics runs, a press on an object grabs its body and never edits the
+    // scene (an edit would restart the simulation); paused, it edits the layers.
     const world = runtime.physics
-    if (st.playing && st.scene.physics?.enabled && world?.bodyCount && frame && leaf && !e.shiftKey) {
-      const item = pickItem(frame, w[0], w[1])
-      if (item && world.grabAt(item, w)) {
-        const target = clickTarget(st.scene.layers, leaf, sel, e.metaKey || e.ctrlKey)
-        if (!sel.includes(target)) st.select(target)
-        drag.current = { kind: "body" }
-        setCursor("grabbing")
+    if (st.playing && st.scene.physics?.enabled && world?.bodyCount && frame && !e.shiftKey) {
+      const layers = st.scene.layers
+      // The body under the pointer, with the tolerance picking uses (slots and edges count)…
+      let item = leaf
+        ? (pickItem(frame, w[0], w[1], PICK_SLACK, leaf) ?? nearestItem(frame, w[0], w[1], (it) => it.layers.some((l) => l.id === leaf)))
+        : null
+      // …or the selected object's body when the press lands inside the selection box off the ink.
+      if (!item && g && inQuad(g.quad, w)) {
+        const byId = new Map(layers.map((l) => [l.id, l]))
+        const drawn = (id: string) => g.ids.includes(id) || g.ids.some((s) => isDescendant(layers, byId.get(id)!, s))
+        item = nearestItem(frame, w[0], w[1], (it) => it.layers.some((l) => byId.has(l.id) && drawn(l.id)))
+      }
+      if (item) {
+        if (leaf) {
+          const target = clickTarget(layers, leaf, sel, e.metaKey || e.ctrlKey)
+          if (!sel.includes(target)) st.select(target)
+        }
+        // A static support or an object past the body limit is only selected.
+        if (world.grabAt(item, w)) {
+          drag.current = { kind: "body" }
+          setCursor("grabbing")
+        }
         return
       }
     }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import Matter from "matter-js"
 import { defaultLibrary } from "../alphabet/sets"
-import { buildFrame } from "../frame"
+import { buildFrame, nearestItem, pickItem } from "../frame"
 import { PhysicsWorld, type MatterLib } from "../physics"
 import { defaultArtboard, defaultPhysics, makeLayer, makeScene, sanitizeScene, xfApply, type Physics, type Scene } from "../scene"
 
@@ -116,6 +116,19 @@ describe("dragging bodies", () => {
     w.step(1 / 60, s.physics!, s.artboard, input)
     expect(w.placement(id)!.x).toBeGreaterThan(a.x + 0.05)
     expect(w.bodyCount).toBe(1)
+  })
+
+  it("a press in a letter's slot still finds its body (picking tolerance), and only that node's items", () => {
+    // П of the geometric set has a hairline slot down the middle: its centre is not ink.
+    const s = makeScene({ set: "geo", layers: [makeLayer("П", { x: 0, y: 0 }), makeLayer("О", { x: 12, y: 0 })], artboard, physics: { ...defaultPhysics } })
+    const f = buildFrame(s, lib, 0, FAR)
+    const [p, o] = s.layers
+    expect(pickItem(f, 0, 0)).toBeNull()
+    expect(pickItem(f, 0, 0, 0.15)).toBe(p.id)
+    expect(pickItem(f, 0, 0, 0.15, o.id)).toBeNull()
+    // Off the ink entirely, the nearest accepted item is still found (a press inside the selection box).
+    expect(nearestItem(f, 0, 4, (it) => it.layers.some((l) => l.id === p.id))).toBe(p.id)
+    expect(nearestItem(f, 0, 4, () => false)).toBeNull()
   })
 
   it("static (locked) bodies cannot be grabbed", () => {

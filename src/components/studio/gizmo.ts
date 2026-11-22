@@ -32,7 +32,10 @@ const locked = (layers: Layer[], id: string) => {
 }
 
 /** The topmost leaf under the point that is not locked (itself or through a group). */
-export function pickLeaf(f: Frame, layers: Layer[], x: number, y: number, slack = 0.15): string | null {
+/** Tolerance of canvas picking, modules: thin slots and edges still hit their object. */
+export const PICK_SLACK = 0.15
+
+export function pickLeaf(f: Frame, layers: Layer[], x: number, y: number, slack = PICK_SLACK): string | null {
   for (const id of pickAll(f, x, y, slack)) if (!locked(layers, id)) return id
   return null
 }

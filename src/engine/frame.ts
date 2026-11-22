@@ -444,15 +444,37 @@ export function pickLayer(f: Frame, x: number, y: number, slack = 0): string | n
   return null
 }
 
-/** Id of the topmost draw item (a clone keeps its suffix) whose shape contains the world point. */
-export function pickItem(f: Frame, x: number, y: number, slack = 0): string | null {
+/**
+ * Id of the topmost draw item (a clone keeps its suffix) whose shape contains
+ * the world point within `slack`. `only` limits the search to the items that
+ * draw this node (the leaf a click resolved to).
+ */
+export function pickItem(f: Frame, x: number, y: number, slack = 0, only?: string): string | null {
   const [wx, wy] = warpPoint(f, x, y)
   for (let k = f.items.length - 1; k >= 0; k--) {
     const it = f.items[k]
     if (it.mask && layerField(it.mask, wx, wy) > slack) continue
-    if (it.layers.some((l) => layerField(l, wx, wy) < slack)) return it.id
+    if (it.layers.some((l) => (only === undefined || l.id === only) && layerField(l, wx, wy) < slack)) return it.id
   }
   return null
+}
+
+/** Id of the accepted draw item whose shape is nearest to the world point, or null. */
+export function nearestItem(f: Frame, x: number, y: number, accept: (it: FrameItem) => boolean): string | null {
+  const [wx, wy] = warpPoint(f, x, y)
+  let best: string | null = null,
+    d = Infinity
+  for (const it of f.items) {
+    if (!accept(it)) continue
+    for (const l of it.layers) {
+      const v = layerField(l, wx, wy)
+      if (v < d) {
+        d = v
+        best = it.id
+      }
+    }
+  }
+  return best
 }
 
 /** Distance from a world point to the nearest shape of the frame (no operators). */
