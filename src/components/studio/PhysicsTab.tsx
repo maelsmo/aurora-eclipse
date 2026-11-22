@@ -32,9 +32,11 @@ const bodyKeys: PhysicsNumKey[] = ["bounce", "friction", "air"]
 
 /** Bodies in the live world, polled while the tab is open. */
 function useBodyCount() {
-  const [n, setN] = useState(0)
+  // The world may already hold bodies when the tab opens on a paused scene: no frame will come to say so.
+  const [n, setN] = useState(() => runtime.physics?.bodyCount ?? 0)
   useEffect(() => {
     let last = 0
+    setN(runtime.physics?.bodyCount ?? 0)
     return runtime.subscribe(() => {
       const now = performance.now()
       if (now - last < 250) return
