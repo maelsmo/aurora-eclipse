@@ -176,3 +176,69 @@ describe("stored sets keep every field", () => {
     expect(g.X.prims).toHaveLength(1)
   })
 })
+
+describe("broken glyph data never reaches the compiler", () => {
+  it("drops modules without their fields; a broken glyph compiles to nothing instead of throwing", async () => {
+    const { sanitizePrim } = await import("../alphabet/sanitize")
+    expect(sanitizePrim({ kind: "arc" })).toBeNull()
+    expect(sanitizePrim({ kind: "box", a: [0, 0], b: [1, "x"] })).toBeNull()
+    expect(sanitizePrim({ kind: "poly", pts: [[0, 0], [1, 1]] })).toBeNull()
+    expect(sanitizePrim({ kind: "box", a: [0, 0], b: [2.5, 2.5], r: [2.5, 0, 0, 0], dir: "arc", junk: 1 })).toEqual({ kind: "box", a: [0, 0], b: [2.5, 2.5], r: [2.5, 0, 0, 0], dir: "arc" })
+    const g = compileGlyph("Z", { Z: { prims: [{ kind: "arc" } as never] } }, defaultAxes, "broken-test")
+    expect(g.prims).toHaveLength(0)
+  })
+
+  it("a recipe with broken modules loads and draws", async () => {
+    const { readRecipe } = await import("../../state/recipe")
+    const { buildFrame } = await import("../frame")
+    const { makeLibrary, mainSet } = await import("../alphabet/sets")
+    const { makeScene, makeLayer } = await import("../scene")
+    const recipe = {
+      format: "aurora-eclipse/scene",
+      version: 3,
+      scene: JSON.parse(JSON.stringify(makeScene({ set: "bad", layers: [makeLayer("A")] }))),
+      sets: [{ id: "bad", name: "Битый", kind: "strokes", base: "default", glyphs: { A: { prims: [{ kind: "arc" }, { kind: "dot", c: [1, 1] }] } } }],
+    }
+    const res = readRecipe(recipe, [mainSet()])
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.sets[0].glyphs.A.prims).toEqual([{ kind: "dot", c: [1, 1] }])
+    const lib = makeLibrary([mainSet(), ...res.sets], 1)
+    expect(() => buildFrame(res.scene, lib, 0, [1e4, 1e4])).not.toThrow()
+  })
+
+  it("a v2 recipe brings its alphabet as a set", async () => {
+    const { readRecipe } = await import("../../state/recipe")
+    const { mainSet, geoSet } = await import("../alphabet/sets")
+    const v2 = {
+      format: "aurora-eclipse/scene",
+      version: 2,
+      scene: { v: 2, layers: [{ id: "a", char: "A", x: 0, y: 0, scale: 1, rotation: 0, color: "#161616", op: "union" }] },
+      alphabet: { name: "Мой v2", glyphs: { A: { prims: [{ kind: "stroke", a: [0.5, 0.5], b: [0.5, 4.5] }] } } },
+    }
+    const res = readRecipe(v2, [mainSet(), geoSet()])
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.sets).toHaveLength(1)
+    expect(res.sets[0].name).toBe("Мой v2")
+    expect(res.scene.set).toBe(res.sets[0].id)
+    // Loading it again into a library that now has it: reused, not copied.
+    const again = readRecipe(v2, [mainSet(), geoSet(), res.sets[0]])
+    expect(again.ok && again.sets).toEqual([])
+    expect(again.ok && again.scene.set).toBe(res.sets[0].id)
+  })
+
+  it("an own recipe in the same session reuses the set whatever the key order; duplicate ids come in once", async () => {
+    const { readRecipe } = await import("../../state/recipe")
+    const { mainSet } = await import("../alphabet/sets")
+    const { makeScene } = await import("../scene")
+    // As the constructor stores an edited glyph: advance first, then modules.
+    const mine = { ...mainSet(), id: "mine", glyphs: { A: { adv: 4, prims: [{ kind: "dot" as const, c: [1, 1] as [number, number] }] } } }
+    const fileSet = { ...mine, glyphs: { A: { prims: [{ c: [1, 1], kind: "dot" }], adv: 4 } } }
+    const recipe = { format: "aurora-eclipse/scene", version: 3, scene: JSON.parse(JSON.stringify(makeScene({ set: "mine" }))), sets: [fileSet, { ...fileSet, name: "copy" }] }
+    const res = readRecipe(recipe, [mainSet(), mine])
+    expect(res.ok && res.sets).toEqual([])
+    const fresh = readRecipe(recipe, [mainSet()])
+    expect(fresh.ok && fresh.sets.map((s) => s.id)).toEqual(["mine"])
+  })
+})

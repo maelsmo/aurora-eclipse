@@ -50,10 +50,15 @@ export function Collection() {
         .slice(0, 64) || "Рецепт"
     if (!useStore.getState().saveToCollection(name, res.scene)) return void toast.error("Хранилище браузера переполнено или недоступно.")
     const added = res.sets.length ? ` Добавлено сетов: ${res.sets.length}.` : ""
+    // The new item is first in the collection now; the toast opens that one even after later loads.
+    const saved = useStore.getState().collection[0]
     toast.success(`Рецепт «${name}» в коллекции.${added}`, {
       action: {
         label: "Открыть",
-        onClick: () => open(useStore.getState().collection[0]),
+        onClick: () => {
+          const item = useStore.getState().collection.find((c) => c.id === saved.id)
+          if (item) open(item)
+        },
       },
     })
   }

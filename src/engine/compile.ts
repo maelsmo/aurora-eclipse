@@ -416,7 +416,14 @@ export function compileGlyph(
     return hit
   }
   const prims = glyphPrims(char, alphabet) ?? []
-  const g = compilePrims(prims, axes)
+  let g: CompiledGlyph
+  try {
+    g = compilePrims(prims, axes)
+  } catch (e) {
+    // A malformed module (old or foreign data) draws nothing instead of taking the app down.
+    console.warn(`Знак «${char}» не собран:`, e)
+    g = compilePrims([], axes)
+  }
   const anchor = alphabet[char]?.anchor
   if (anchor) g.anchor = anchor
   if (cache.size >= CACHE_SIZE) cache.delete(cache.keys().next().value!)

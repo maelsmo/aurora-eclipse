@@ -149,7 +149,7 @@ export function normalize(input: Layer[]): Layer[] {
     const p = l.parent ? byId.get(l.parent) : undefined
     if (l.parent !== undefined && (!p || !isGroup(p) || p.id === l.id)) delete l.parent
   }
-  // Cycles and depth.
+  // Cycles.
   for (const l of layers) {
     const chain: string[] = []
     let p = l.parent
@@ -158,6 +158,18 @@ export function normalize(input: Layer[]): Layer[] {
         delete l.parent
         break
       }
+      chain.push(p)
+      p = byId.get(p)?.parent
+    }
+  }
+  // The valid tree as given: nodes moved below keep their world placement in it.
+  const before = layers.map((l) => ({ ...l }))
+  const parentBefore = new Map(layers.map((l) => [l.id, l.parent]))
+  // Depth.
+  for (const l of layers) {
+    const chain: string[] = []
+    let p = l.parent
+    while (p) {
       chain.push(p)
       p = byId.get(p)?.parent
     }
@@ -170,6 +182,13 @@ export function normalize(input: Layer[]): Layer[] {
       if (p.parent) l.parent = p.parent
       else delete l.parent
     }
+  }
+  // A node moved to an ancestor keeps where it is drawn (its transform becomes local to the new parent).
+  for (const l of layers) {
+    if (l.parent === parentBefore.get(l.id)) continue
+    const world = worldXf(before, l.id)
+    const host = l.parent ? worldXf(before, l.parent) : identity
+    Object.assign(l, xfToFields(xfCompose(xfInvert(host), world)))
   }
   // Pre-order rebuild: children in their original relative order.
   const kids = new Map<string | undefined, Layer[]>()
@@ -212,6 +231,26 @@ export function addIssue(layers: Layer[], parent: string | undefined, leaves: nu
   if (isGroup(host) && host.mode === "merge") {
     const n = layers.filter((l) => l.parent === host.id).length
     if (n + leaves > LIMITS.mergeChildren) return `В сплаве не больше ${LIMITS.mergeChildren} объектов: в «${host.name ?? "Сплав"}» уже ${n}.`
+  }
+  return null
+}
+
+/** Levels below a node (0 for a leaf or an empty group). */
+function heightBelow(layers: Layer[], id: string): number {
+  let h = 0
+  for (const l of layers) if (l.parent === id) h = Math.max(h, 1 + heightBelow(layers, l.id))
+  return h
+}
+
+/**
+ * Why putting the subtrees `ids` under `parent` (or, with `parent` omitted,
+ * wrapping them into one new group where they are) would nest deeper than
+ * LIMITS.depth — or null when it fits.
+ */
+export function depthIssue(layers: Layer[], ids: string[], parent?: string | null): string | null {
+  for (const id of ids) {
+    const above = parent === undefined ? ancestors(layers, id).length + 1 : parent === null ? 0 : ancestors(layers, parent).length + 1
+    if (above + heightBelow(layers, id) > LIMITS.depth) return `Вложенность групп не больше ${LIMITS.depth} уровней.`
   }
   return null
 }

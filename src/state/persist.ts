@@ -4,6 +4,7 @@ import { KEYS, KEYS_V2, readJSON } from "@/engine/storage"
 import { geoSet, mainSet, type GlyphSet, type SetBase, type SetKind } from "@/engine/alphabet/sets"
 import { sanitizeLookPatch, sanitizeScene, type Scene } from "@/engine/scene"
 import type { GlyphDef } from "@/engine/types"
+import { sanitizePrim } from "@/engine/alphabet/sanitize"
 
 export type SavedScene = { id: string; name: string; scene: Scene; created: number }
 export type StoredUi = { tab?: string; editing?: string; editingSet?: string }
@@ -11,7 +12,6 @@ export type StoredUi = { tab?: string; editing?: string; editingSet?: string }
 type Raw = Record<string, unknown>
 const isObj = (v: unknown): v is Raw => !!v && typeof v === "object" && !Array.isArray(v)
 
-const PRIM_KINDS = ["stroke", "arc", "dot", "hole", "slot", "box", "ellipse", "sector", "poly"]
 const finitePair = (v: unknown): v is [number, number] => Array.isArray(v) && v.length === 2 && v.every((x) => typeof x === "number" && Number.isFinite(x))
 
 /**
@@ -23,7 +23,8 @@ export function sanitizeGlyphs(raw: unknown): Record<string, GlyphDef> {
   if (!isObj(raw)) return out
   for (const [c, g] of Object.entries(raw)) {
     if ([...c].length !== 1 || !isObj(g) || !Array.isArray(g.prims)) continue
-    const def: GlyphDef = { prims: g.prims.filter((p) => isObj(p) && typeof p.kind === "string" && PRIM_KINDS.includes(p.kind)) as GlyphDef["prims"] }
+    // Every module is checked field by field: a broken one is dropped, never compiled.
+    const def: GlyphDef = { prims: g.prims.map(sanitizePrim).filter((p): p is GlyphDef["prims"][number] => !!p) }
     if (typeof g.adv === "number" && Number.isFinite(g.adv)) def.adv = g.adv
     if (typeof g.base === "string" && [...g.base].length === 1) def.base = g.base
     if (finitePair(g.anchor)) def.anchor = [g.anchor[0], g.anchor[1]]

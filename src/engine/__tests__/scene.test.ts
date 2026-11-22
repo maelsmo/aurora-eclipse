@@ -374,3 +374,52 @@ describe("limits never drop objects silently", () => {
     expect(addIssue(crowd.layers, undefined, 0, 2)).toMatch(/не больше 256/)
   })
 })
+
+describe("moving nodes up keeps them in place", () => {
+  it("grouping letters inside a shifted merge does not move them", async () => {
+    const { worldXf: w } = await import("../scene")
+    const letters = layoutText("HELLO", defaultAlphabet, defaultAxes, 0.15)
+    const s0 = mergeScene(letters)
+    const merge = s0.layers[0]
+    const s = { ...s0, layers: s0.layers.map((l) => (l.id === merge.id ? { ...l, x: 78, y: 40, rotation: 15 } : l)) }
+    const ids = s.layers.filter((l) => isLetter(l) && (l.char === "L" || l.char === "E")).map((l) => l.id)
+    const before = ids.map((id) => w(s.layers, id))
+    const res = groupNodes(s, ids, "stack")
+    // The group cannot live in a merge: it moves next to it, its letters stay where they were drawn.
+    const g = res.scene.layers.find((l) => l.id === res.id)!
+    expect(g.parent).toBe(merge.parent)
+    ids.forEach((id, i) => {
+      const a = before[i],
+        b = w(res.scene.layers, id)
+      expect(b.x).toBeCloseTo(a.x, 6)
+      expect(b.y).toBeCloseTo(a.y, 6)
+      expect(b.cos).toBeCloseTo(a.cos, 6)
+    })
+  })
+
+  it("too deep nesting is refused up front, and repaired without moving anything", async () => {
+    const { depthIssue, normalize: norm, worldXf: w, LIMITS: L } = await import("../scene")
+    // A letter inside LIMITS.depth turned groups.
+    const groups = Array.from({ length: L.depth }, (_, i) => makeGroup("stack", { rotation: 20, x: 1 }))
+    groups.forEach((g, i) => i && (g.parent = groups[i - 1].id))
+    const leaf = { ...makeLayer("A", { rotation: 10 }), parent: groups[L.depth - 1].id }
+    const layers = norm([...groups, leaf])
+    expect(depthIssue(layers, [leaf.id])).toMatch(/не больше 6/)
+    // A group with a letter dropped into the deepest group would need a seventh level.
+    const box = makeGroup("stack")
+    const withBox = norm([...layers, box, { ...makeLayer("B"), parent: box.id }])
+    expect(depthIssue(withBox, [box.id], groups[L.depth - 1].id)).toMatch(/не больше 6/)
+    expect(depthIssue(withBox, [box.id], groups[L.depth - 2].id)).toBeNull()
+    // One more level forced in (as imported data could be): the leaf moves up and keeps its world placement.
+    const extra = makeGroup("stack", { rotation: 20, x: 1, parent: groups[L.depth - 1].id })
+    const deep = [...layers.slice(0, -1), extra, { ...leaf, parent: extra.id }]
+    const before = w(deep, leaf.id)
+    const fixed = norm(deep)
+    const after = w(fixed, leaf.id)
+    expect(fixed.find((l) => l.id === leaf.id)!.parent).not.toBe(extra.id)
+    expect(after.x).toBeCloseTo(before.x, 6)
+    expect(after.y).toBeCloseTo(before.y, 6)
+    expect(after.cos).toBeCloseTo(before.cos, 6)
+    expect(after.sin).toBeCloseTo(before.sin, 6)
+  })
+})

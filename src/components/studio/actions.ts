@@ -1,7 +1,7 @@
 // Scene actions on the current selection, shared by the layer tree, its
 // context menu, the canvas and keyboard shortcuts.
 import { toast } from "sonner"
-import { childrenOf, deleteNodes, duplicateNodes, groupNodes, isDescendant, isGroup, isLeaf, LIMITS, moveNode, ungroup, type GroupMode, type Layer, type Scene, ancestors, defaultCloner, addIssue, subtreeSize } from "@/engine/scene"
+import { childrenOf, deleteNodes, duplicateNodes, groupNodes, isDescendant, isGroup, isLeaf, LIMITS, moveNode, ungroup, type GroupMode, type Layer, type Scene, ancestors, defaultCloner, addIssue, subtreeSize, depthIssue } from "@/engine/scene"
 import { selectedIds, useStore } from "@/state/store"
 import { runtime } from "@/state/runtime"
 import { layerBounds } from "@/engine/frame"
@@ -27,7 +27,7 @@ export function groupSelection(mode: GroupMode) {
   }
   if (mode === "merge" && ids.length > LIMITS.mergeChildren)
     return void toast.error(`В сплаве не больше ${LIMITS.mergeChildren} объектов, выделено ${ids.length}. Разбейте их на несколько сплавов.`)
-  const issue = addIssue(s.scene.layers, undefined, 0, 1)
+  const issue = addIssue(s.scene.layers, undefined, 0, 1) ?? depthIssue(s.scene.layers, ids)
   if (issue) return void toast.error(issue)
   const { scene, id } = groupNodes(s.scene, ids, mode)
   s.setScene(scene)
@@ -127,7 +127,7 @@ export function moveTo(dragged: string[], target: DropTarget) {
   const ok = roots.filter((id) => !(isGroup(host) && host.mode === "merge" && !isLeaf(scene.layers.find((l) => l.id === id))))
   if (ok.length < roots.length) toast("Группы не входят в сплав: в нём только буквы и фигуры.")
   const arriving = ok.filter((id) => scene.layers.find((l) => l.id === id)?.parent !== parent).length
-  const issue = addIssue(scene.layers, parent, arriving, 0)
+  const issue = addIssue(scene.layers, parent, arriving, 0) ?? depthIssue(scene.layers, ok, parent ?? null)
   if (issue) return void toast.error(issue)
   let next = scene
   // Keep the dragged nodes' z-order: the topmost one ends up highest.
@@ -196,7 +196,7 @@ export function clonerFromSelection() {
   const cloner = tiles
     ? { ...defaultCloner, dx: Math.round(w * 4) / 4, dy: Math.round(h * 4) / 4 }
     : { ...defaultCloner, cols: 4, rows: 3, dx: Math.round((w + 0.5) * 4) / 4, dy: Math.round((h + 0.5) * 4) / 4 }
-  const issue = addIssue(s.scene.layers, undefined, 0, 1)
+  const issue = addIssue(s.scene.layers, undefined, 0, 1) ?? depthIssue(s.scene.layers, ids)
   if (issue) return void toast.error(issue)
   const { scene, id } = groupNodes(s.scene, ids, "stack", { name: "Клонер", cloner })
   s.setScene(scene)
