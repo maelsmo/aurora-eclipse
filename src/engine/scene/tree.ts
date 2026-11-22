@@ -230,7 +230,8 @@ export function addIssue(layers: Layer[], parent: string | undefined, leaves: nu
   const host = parent ? layers.find((l) => l.id === parent) : undefined
   if (isGroup(host) && host.mode === "merge") {
     const n = layers.filter((l) => l.parent === host.id).length
-    if (n + leaves > LIMITS.mergeChildren) return `В сплаве не больше ${LIMITS.mergeChildren} объектов: в «${host.name ?? "Сплав"}» уже ${n}.`
+    if (n + leaves > LIMITS.mergeChildren)
+      return `В сплаве не больше ${LIMITS.mergeChildren} объектов: в «${host.name ?? "Сплав"}» уже ${n}, добавляется ${leaves}.`
   }
   return null
 }

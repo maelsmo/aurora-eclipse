@@ -52,7 +52,8 @@ export default function App() {
       const el = e.target as HTMLElement
       if (el.closest("input, textarea, [contenteditable], [role=dialog], [role=menu]")) return
       const studio = useStore.getState().tab === "studio"
-      const k = e.key.toLowerCase()
+      // Letters by physical key: works with a Russian layout and with ⌥ (which turns G into ©).
+      const k = e.code.startsWith("Key") ? e.code.slice(3).toLowerCase() : e.key.toLowerCase()
       // Scene shortcuts without modifiers (Figma-like).
       if (studio && !(e.metaKey || e.ctrlKey || e.altKey)) {
         if (k === "delete" || k === "backspace") {

@@ -298,3 +298,18 @@ describe("svg ids", () => {
     for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9_-]+$/)
   })
 })
+
+describe("small texts", () => {
+  it("Russian plurals, file names without tile symbols, limit message with the count", async () => {
+    const { plural } = await import("../../components/shared/labels")
+    const f = (n: number) => `${n} ${plural(n, "объект", "объекта", "объектов")}`
+    expect([1, 2, 5, 11, 12, 21, 22, 25, 101, 111].map(f)).toEqual([
+      "1 объект", "2 объекта", "5 объектов", "11 объектов", "12 объектов", "21 объект", "22 объекта", "25 объектов", "101 объект", "111 объектов",
+    ])
+    const { fileStem } = await import("../export")
+    const { makeScene, mergeScene, addIssue } = await import("../scene")
+    expect(fileStem(makeScene({ layers: [makeLayer("◠", { set: "geo" }), makeLayer("A"), makeLayer("Ж")] }))).toBe("aurora-eclipse_AЖ")
+    const full = mergeScene(Array.from({ length: 30 }, () => makeLayer("A")))
+    expect(addIssue(full.layers, full.layers[0].id, 3, 3)).toMatch(/уже 30, добавляется 3/)
+  })
+})

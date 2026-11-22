@@ -95,5 +95,6 @@ export function recordCanvas(canvas: HTMLCanvasElement, seconds: number, onProgr
   })
 }
 
+/** File name stem from the scene's letters (pattern tiles and other symbols left out). */
 export const fileStem = (scene: Scene) =>
-  "aurora-eclipse_" + (scene.layers.map((l) => (l.type === "letter" ? l.char : "")).join("") || "scene").slice(0, 24)
+  "aurora-eclipse_" + (scene.layers.map((l) => (l.type === "letter" && /[\p{L}\p{N}]/u.test(l.char) ? l.char : "")).join("") || "scene").slice(0, 24)

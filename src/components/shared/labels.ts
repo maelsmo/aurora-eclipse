@@ -34,3 +34,12 @@ export const pickNames: Record<ClonerPick, string> = {
 
 /** Effector kinds. */
 export const effectorNames: Record<EffectorKind, string> = { random: "Случайность", noise: "Шум", wave: "Волна", field: "Поле" }
+
+/** Russian plural form for n: plural(5, "объект", "объекта", "объектов") → "объектов". */
+export function plural(n: number, one: string, few: string, many: string) {
+  const m10 = n % 10,
+    m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
+  return many
+}

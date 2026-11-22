@@ -10,6 +10,7 @@ import { Section, Hint } from "@/components/shared/Section"
 import { physicsParams, type PhysicsNumKey } from "@/engine/params"
 import { defaultPhysics, parentXf, worldXf, xfCompose, xfInvert, xfToFields, type Physics, type PhysicsField, type PhysicsPointer } from "@/engine/scene"
 import { useStore } from "@/state/store"
+import { plural } from "@/components/shared/labels"
 import { runtime } from "@/state/runtime"
 
 const pointerItems: { value: PhysicsPointer; label: string }[] = [
@@ -81,7 +82,7 @@ export function PhysicsTab() {
       })
       return { ...s, layers }
     })
-    toast(moved ? `Положения ${moved} объектов записаны в сцену.` : "Нечего записывать: клоны двигаются только в живом просмотре.")
+    toast(moved ? `Положения ${moved} ${plural(moved, "объекта", "объектов", "объектов")} записаны в сцену.` : "Нечего записывать: клоны двигаются только в живом просмотре.")
   }
 
   return (

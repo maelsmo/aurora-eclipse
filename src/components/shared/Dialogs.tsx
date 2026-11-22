@@ -212,7 +212,7 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
 
   return (
     <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Экспорт</DialogTitle>
           <DialogDescription>{format === "video" && videoKind === "mp4" ? "Видео считается заново с начала сцены." : "Кадр зафиксирован в момент открытия окна."}</DialogDescription>

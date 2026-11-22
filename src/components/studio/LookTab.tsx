@@ -8,12 +8,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ParamSlider } from "@/components/shared/ParamSlider"
 import { ColorInput } from "@/components/shared/ColorInput"
 import { Section, Hint } from "@/components/shared/Section"
-import { nodeLabel } from "@/components/shared/labels"
+import { nodeLabel, plural } from "@/components/shared/labels"
 import { lookParams, layerTarget, type LookNumKey } from "@/engine/params"
 import { ancestors, mergeParent, type ColorMode, type Look, type LookKey, type LookMode, type LookPatch, type Layer, type Scene } from "@/engine/scene"
 import type { Library } from "@/engine/alphabet/sets"
 import { selectedIds, useStore } from "@/state/store"
-import { cn } from "@/lib/utils"
 
 const modes: { value: LookMode; label: string }[] = [
   { value: "fill", label: "Заливка" },
@@ -99,7 +98,7 @@ export function LookEditor({
           spacing={0}
           value={[look.mode]}
           onValueChange={(v) => v[0] && onPatch({ mode: v[0] as LookMode })}
-          className={cn("w-full", sources && !own("mode") && "opacity-80")}
+          className="w-full"
           aria-label="Отрисовка"
         >
           {modes.map((m) => (
@@ -210,7 +209,7 @@ export function LookTab() {
       }),
     )
   return (
-    <Section title={nodes.length > 1 ? `Вид · ${nodes.length} объекта` : `Вид: ${nodeLabel(primary)}`}>
+    <Section title={nodes.length > 1 ? `Вид · ${nodes.length} ${plural(nodes.length, "объект", "объекта", "объектов")}` : `Вид: ${nodeLabel(primary)}`}>
       {host && (
         <Hint>
           Объект внутри сплава «{nodeLabel(host)}»: форму и отрисовку задаёт сплав целиком, у буквы работают только цвет и

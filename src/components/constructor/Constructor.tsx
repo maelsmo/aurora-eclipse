@@ -10,6 +10,7 @@ import {
   Minus,
   Undo2,
   CircleDot,
+  Ellipse,
   RectangleHorizontal,
   Square,
   SquareRoundCorner,
@@ -38,7 +39,7 @@ const tools: { value: Tool; label: string; hint: string; Icon: typeof Circle }[]
   { value: "slot", label: "Прорезь", hint: "Вычитаемая капсула (L)", Icon: RectangleHorizontal },
   { value: "box", label: "Клетка", hint: "Прямоугольник: протяните по сетке (B)", Icon: Square },
   { value: "quarter", label: "Четверть", hint: "Четверть круга: угол в конце протяжки скругляется (Q)", Icon: SquareRoundCorner },
-  { value: "ellipse", label: "Эллипс", hint: "Эллипс в протянутой рамке (E)", Icon: Circle },
+  { value: "ellipse", label: "Эллипс", hint: "Эллипс в протянутой рамке (E)", Icon: Ellipse },
   { value: "poly", label: "Клин", hint: "Прямоугольный треугольник с прямым углом в начале (T)", Icon: Triangle },
 ]
 const keys: Record<string, Tool> = { v: "select", s: "stroke", a: "arc", d: "dot", h: "hole", l: "slot", b: "box", q: "quarter", e: "ellipse", t: "poly" }
@@ -82,7 +83,7 @@ export function Constructor() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (e.metaKey || e.ctrlKey || e.altKey || el.closest("input, textarea, [contenteditable]")) return
-      const t = keys[e.key.toLowerCase()]
+      const t = keys[e.code.startsWith("Key") ? e.code.slice(3).toLowerCase() : e.key.toLowerCase()]
       if (t) setTool(t)
     }
     window.addEventListener("keydown", onKey)

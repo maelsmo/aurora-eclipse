@@ -11,7 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ParamSlider } from "@/components/shared/ParamSlider"
 import { ColorInput } from "@/components/shared/ColorInput"
 import { Section, Hint } from "@/components/shared/Section"
-import { effectorNames, pickNames } from "@/components/shared/labels"
+import { effectorNames, pickNames, plural } from "@/components/shared/labels"
 import { clonerParams, effectorParams, layerTarget, type ClonerNumKey, type EffectorNumKey } from "@/engine/params"
 import { cloneCount } from "@/engine/cloner"
 import {
@@ -154,7 +154,7 @@ export function ClonerTab() {
       <Section title="Чередование">
         <Hint>
           {children.length > 1
-            ? `${children.length} объекта группы чередуются по зонам раскладки; палитра перекрашивает клоны по тем же зонам.`
+            ? `${children.length} ${plural(children.length, "объект", "объекта", "объектов")} группы чередуются по зонам раскладки; палитра перекрашивает клоны по тем же зонам.`
             : "Зоны раскладки задают цвета палитры. Добавьте в группу ещё объекты — они будут чередоваться по тем же зонам."}
         </Hint>
         <div className="flex items-center justify-between gap-2">

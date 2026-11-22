@@ -61,7 +61,7 @@ function frontField(f: Frame, it: FrameItem, r: Region): Field | null {
 }
 
 /** Node ids (imported scenes may carry anything) as safe XML id characters. */
-export const xmlId = (id: string) => id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64)
+export const xmlId = (id: string) => "n-" + id.replace(/[^A-Za-z0-9_-]/g, "_")
 
 /** Can this item be drawn as a placed copy of its glyph (no warp, mask or per-pixel colour)? */
 function placeable(f: Frame, it: FrameItem) {

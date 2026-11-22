@@ -67,7 +67,7 @@ export function SetLookSection() {
         className="w-full"
       >
         {modes.map((m) => (
-          <ToggleGroupItem key={m.value} value={m.value} className="flex-1">
+          <ToggleGroupItem key={m.value} value={m.value} className="flex-1 px-1">
             {m.label}
           </ToggleGroupItem>
         ))}
