@@ -96,6 +96,7 @@ function nativeShape(g: CompiledGlyph, inset: number): string | null {
   const U = UNIT,
     n = (v: number) => +v.toFixed(2)
   if (p.kind === "box") {
+    if ((p.t ?? 1) < 1) return null
     const r = p.r[0]
     if (!p.r.every((v) => Math.abs(v - r) < 1e-9) || r > Math.min(p.h[0], p.h[1]) + 1e-9) return null
     return `<rect x="${n((p.c[0] - p.h[0]) * U)}" y="${n(-(p.c[1] + p.h[1]) * U)}" width="${n(2 * p.h[0] * U)}" height="${n(2 * p.h[1] * U)}"${r > 0 ? ` rx="${n(r * U)}"` : ""}/>`

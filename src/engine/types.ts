@@ -126,7 +126,7 @@ export type CompiledPrim =
   | { kind: "hole"; c: Vec; r: number }
   | { kind: "slot"; a: Vec; b: Vec; r: number }
   /** Centre, half size, corner radii (tl, tr, br, bl), stripe origin (design → deformed grid). */
-  | ({ kind: "box"; c: Vec; h: Vec; r: [number, number, number, number] } & GeoFlags)
+  | ({ kind: "box"; c: Vec; h: Vec; r: [number, number, number, number]; /** roundness of the corner cuts: 1 arcs, 0 chamfers */ t?: number } & GeoFlags)
   | ({ kind: "ellipse"; c: Vec; rx: number; ry: number } & GeoFlags)
   /** Angles in radians; r0 = 0 for a disc sector. sx / sy stretch it with the width axis. */
   | ({ kind: "sector"; c: Vec; r: number; r0: number; a0: number; a1: number; sx: number; sy: number } & GeoFlags)

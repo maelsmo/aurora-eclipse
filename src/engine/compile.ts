@@ -261,11 +261,14 @@ export function compilePrims(prims: PrimDef[], axes: Axes): CompiledGlyph {
           b = map(p.b)
         const hx = Math.abs(b[0] - a[0]) / 2,
           hy = Math.abs(b[1] - a[1]) / 2
-        // Positive modules follow the terminal axis: 1 round tiles, 0 square tiles.
-        const k = Math.min(kx, ky) * (p.neg ? 1 : Math.max(0, Math.min(1, axes.terminal)))
+        const k = Math.min(kx, ky)
         // Radii go up to the full side (a quarter disc cell).
         const r = (p.r ?? [0, 0, 0, 0]).map((v) => Math.max(0, Math.min(v * k, 2 * hx, 2 * hy))) as [number, number, number, number]
-        out.push({ kind: "box", c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], h: [hx, hy], r, ...geoFlags(p) })
+        // Positive modules follow the terminal axis: 1 — the cuts are arcs (quarters, bowls),
+        // 0 — straight 45° cuts through the same points ("прямой срез"): a quarter becomes a
+        // triangle, a dome a roof, a bowl an octagon. Cut-outs keep their round ends.
+        const t = p.neg ? 1 : Math.max(0, Math.min(1, axes.terminal))
+        out.push({ kind: "box", c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], h: [hx, hy], r, ...(t < 1 ? { t } : {}), ...geoFlags(p) })
         if (!p.neg) {
           grow(box, Math.min(a[0], b[0]), Math.min(a[1], b[1]), 0)
           grow(box, Math.max(a[0], b[0]), Math.max(a[1], b[1]), 0)
@@ -341,6 +344,8 @@ function mergePair(a: CBox, b: CBox): CBox | null {
     c: [(x0 + x1) / 2, (y0 + y1) / 2],
     h: [(x1 - x0) / 2, (y1 - y0) / 2],
     r,
+    // Tiles of one glyph share the terminal axis: the merged box keeps their corner roundness.
+    ...(a.t !== undefined ? { t: a.t } : {}),
     mode: 0,
     dir: 0,
     neg: false,

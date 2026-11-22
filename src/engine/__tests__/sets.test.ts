@@ -94,11 +94,29 @@ describe("geometric set", () => {
     }
     expect(sdRoundBox4(0.2, 2.3, 1.25, 1.25, 1.25, 1.25, [2.5, 0, 0, 0])).toBeCloseTo(Math.hypot(2.3, 2.3) - 2.5, 9)
   })
-  it("the terminal axis turns round cells square", () => {
+  it("the terminal axis cuts quarters straight at 0 (a quarter becomes a triangle)", () => {
     const round = compileGlyph("O", geoAlphabet, defaultAxes, "geo-test")
-    const square = compileGlyph("O", geoAlphabet, { ...defaultAxes, terminal: 0 }, "geo-test")
+    const cut = compileGlyph("O", geoAlphabet, { ...defaultAxes, terminal: 0 }, "geo-test")
+    // (0.8, 0.8) lies inside the bottom-left quarter disc, outside its chamfer x + y ≥ 2.5.
+    expect(sdGlyph(round, 0.8, 0.8)).toBeLessThan(0)
+    expect(sdGlyph(cut, 0.8, 0.8)).toBeGreaterThan(0)
+    // On the chamfer line the cut field is zero; the corner stays empty in both.
+    expect(Math.abs(sdGlyph(cut, 1.0, 1.5))).toBeLessThan(1e-6)
     expect(sdGlyph(round, 0.2, 0.2)).toBeGreaterThan(0)
-    expect(sdGlyph(square, 0.2, 0.2)).toBeLessThan(0)
+    expect(sdGlyph(cut, 0.2, 0.2)).toBeGreaterThan(0)
+  })
+  it("at terminal 0 the confusable pairs differ in silhouette", () => {
+    const axes = { ...defaultAxes, terminal: 0 }
+    const ink = (c: string) => {
+      const g = compileGlyph(c, geoAlphabet, axes, "geo-test")
+      const out: boolean[] = []
+      for (let y = 0.05; y < 5; y += 0.1) for (let x = 0.05; x < 5; x += 0.1) out.push(sdGlyph(g, x, y) < 0)
+      return out
+    }
+    const diff = (a: string, b: string) => ink(a).reduce((n, v, i) => n + (v !== ink(b)[i] ? 1 : 0), 0)
+    // Several percent of the 2 × 2 block, not just a slot.
+    expect(diff("A", "H")).toBeGreaterThan(200)
+    expect(diff("M", "U")).toBeGreaterThan(100)
   })
   it("stripes continue across the joint of a round cell and a stem", () => {
     // A: the dome cell (arcs) sits on the leg cell (vertical stripes) along y = 2.5.

@@ -128,7 +128,13 @@ const CORNER_SX = [-1, 1, 1, -1],
  * opposite ones into a leaf. Box ∩ corner discs; exact inside the corner
  * zones and on the edges.
  */
-export function sdRoundBox4(px: number, py: number, cx: number, cy: number, hx: number, hy: number, r: readonly number[]) {
+/**
+ * Box with every corner cut by `r` (tl, tr, br, bl). `t` is the roundness
+ * of the cuts: 1 — circular arcs (a radius of the full side makes a quarter
+ * disc), 0 — straight 45° chamfers through the same points, in between a
+ * blend of the two fields.
+ */
+export function sdRoundBox4(px: number, py: number, cx: number, cy: number, hx: number, hy: number, r: readonly number[], t = 1) {
   const qx = Math.abs(px - cx) - hx,
     qy = Math.abs(py - cy) - hy
   let d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0)
@@ -138,7 +144,10 @@ export function sdRoundBox4(px: number, py: number, cx: number, cy: number, hx: 
     // Corner frame: the corner circle's centre at the origin, the corner in +x +y.
     const ux = (px - (cx + CORNER_SX[i] * (hx - rr))) * CORNER_SX[i],
       uy = (py - (cy + CORNER_SY[i] * (hy - rr))) * CORNER_SY[i]
-    if (ux > 0 && uy > 0) d = Math.max(d, Math.hypot(ux, uy) - rr)
+    // Both cuts lie in the corner quadrant (the chamfer joins (rr, 0) and (0, rr)).
+    if (ux <= 0 || uy <= 0) continue
+    const round = Math.hypot(ux, uy) - rr
+    d = Math.max(d, t >= 1 ? round : t * round + (1 - t) * (ux + uy - rr) * Math.SQRT1_2)
   }
   return d
 }
@@ -252,7 +261,7 @@ export function sdPrim(p: CompiledPrim, x: number, y: number) {
     case "hole":
       return Math.hypot(x - p.c[0], y - p.c[1]) - p.r
     case "box":
-      return sdRoundBox4(x, y, p.c[0], p.c[1], p.h[0], p.h[1], p.r)
+      return sdRoundBox4(x, y, p.c[0], p.c[1], p.h[0], p.h[1], p.r, p.t ?? 1)
     case "ellipse":
       return sdEllipse(x, y, p.c[0], p.c[1], p.rx, p.ry)
     case "sector":

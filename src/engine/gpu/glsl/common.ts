@@ -73,17 +73,20 @@ float sdBox(vec2 p, vec4 b) {
 
 // r: top-left, top-right, bottom-right, bottom-left, each up to the full side
 // (box ∩ corner discs: radius = side makes a quarter disc cell).
-float cornerCut(vec2 p, vec2 c, vec2 h, float rr, vec2 s) {
+// Corner cut of radius rr: circular for t = 1, a 45° chamfer through the same points for t = 0.
+float cornerCut(vec2 p, vec2 c, vec2 h, float rr, vec2 s, float t) {
   vec2 u = (p - (c + s * (h - rr))) * s;
-  return (rr > 0.0 && u.x > 0.0 && u.y > 0.0) ? length(u) - rr : -BIG;
+  if (rr <= 0.0 || u.x <= 0.0 || u.y <= 0.0) return -BIG;
+  float round = length(u) - rr;
+  return t >= 1.0 ? round : mix((u.x + u.y - rr) * 0.70710678, round, t);
 }
-float sdRoundBox4(vec2 p, vec2 c, vec2 h, vec4 r) {
+float sdRoundBox4(vec2 p, vec2 c, vec2 h, vec4 r, float t) {
   vec2 q = abs(p - c) - h;
   float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
-  d = max(d, cornerCut(p, c, h, r.x, vec2(-1.0, 1.0)));
-  d = max(d, cornerCut(p, c, h, r.y, vec2(1.0, 1.0)));
-  d = max(d, cornerCut(p, c, h, r.z, vec2(1.0, -1.0)));
-  d = max(d, cornerCut(p, c, h, r.w, vec2(-1.0, -1.0)));
+  d = max(d, cornerCut(p, c, h, r.x, vec2(-1.0, 1.0), t));
+  d = max(d, cornerCut(p, c, h, r.y, vec2(1.0, 1.0), t));
+  d = max(d, cornerCut(p, c, h, r.z, vec2(1.0, -1.0), t));
+  d = max(d, cornerCut(p, c, h, r.w, vec2(-1.0, -1.0), t));
   return d;
 }
 
@@ -169,7 +172,7 @@ vec4 look(int i, int slot) { return texelFetch(uLooks, ivec2(slot, i), 0); }
 /** Field of a geometric module (box, ellipse, sector, poly, ngon). */
 float geoField(int kind, int i, vec2 p, vec4 t0) {
   vec4 t1 = prim(i, 1);
-  if (kind == ${KIND.box}) return sdRoundBox4(p, t0.yz, vec2(t0.w, t1.x), vec4(t1.yzw, prim(i, 2).x));
+  if (kind == ${KIND.box}) return sdRoundBox4(p, t0.yz, vec2(t0.w, t1.x), vec4(t1.yzw, prim(i, 2).x), prim(i, 3).x);
   if (kind == ${KIND.ellipse}) return sdEllipse(p, t0.yz, vec2(t0.w, t1.x));
   if (kind == ${KIND.sector}) return sdSector(p, t0, t1, prim(i, 3));
   if (kind == ${KIND.poly}) return sdPolygon8(p, prim(i, 3), prim(i, 4), prim(i, 5), prim(i, 6), int(t0.y + 0.5));

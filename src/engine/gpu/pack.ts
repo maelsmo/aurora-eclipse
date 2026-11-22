@@ -111,7 +111,8 @@ function writeGlyph(P: Float32Array, prims: CompiledGlyph["prims"], start: numbe
         break
       }
       case "box":
-        P.set([KIND.box, p.c[0], p.c[1], p.h[0], p.h[1], p.r[0], p.r[1], p.r[2], p.r[3], p.mode, p.dir, p.neg ? 1 : 0], o)
+        // Texel 3: roundness of the corner cuts (1 arcs, 0 chamfers).
+        P.set([KIND.box, p.c[0], p.c[1], p.h[0], p.h[1], p.r[0], p.r[1], p.r[2], p.r[3], p.mode, p.dir, p.neg ? 1 : 0, p.t ?? 1], o)
         break
       case "ellipse":
         P.set([KIND.ellipse, p.c[0], p.c[1], p.rx, p.ry, 0, 0, 0, 0, p.mode, p.dir, p.neg ? 1 : 0], o)

@@ -14,8 +14,8 @@
 // - Each cell carries its stripe direction: stems vertical, bars horizontal,
 //   rounded cells concentric arcs — the «lines» look draws the letter as
 //   bundles of parallel lines (AQA 003), the inset opens gaps between cells
-//   (a mosaic of the cells), the terminal axis turns round cells square
-//   (AQA 002), outlines give AQA 004–005.
+//   (a mosaic of the cells), the terminal axis cuts quarters and bowls
+//   straight at 0 (a quarter becomes a triangle, a dome a roof; AQA 002), outlines give AQA 004–005.
 // The construction system follows the reference; the letter solutions are
 // our own.
 import type { Alphabet, BoxDef, PolyDef, PrimDir, SectorDef, Vec } from "../types"
