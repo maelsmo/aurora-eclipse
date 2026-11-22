@@ -1,6 +1,31 @@
-import { useState } from "react"
-import { ChevronDown, ChevronUp, Copy, Eye, EyeOff, Plus, Trash2, Type } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  CaseUpper,
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Combine,
+  Copy,
+  Eye,
+  EyeOff,
+  Folder,
+  Grid3x3,
+  Lock,
+  LockOpen,
+  Pencil,
+  Plus,
+  Search,
+  SquareDashed,
+  Trash2,
+  Type,
+  Ungroup,
+  X,
+} from "lucide-react"
 import { toast } from "sonner"
+import { useShallow } from "zustand/react/shallow"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -8,93 +33,188 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  ContextMenu,
+  ContextMenuCheckboxItem,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { GlyphPicker } from "@/components/shared/GlyphPicker"
 import { GlyphThumb } from "@/components/shared/Thumbs"
 import { ParamSlider } from "@/components/shared/ParamSlider"
 import { opIcons } from "@/components/shared/icons"
+import { nodeLabel, shapeNames } from "@/components/shared/labels"
+import { ShapeIcon } from "@/components/shared/ShapeIcon"
 import { opInfo, ops, type Op } from "@/engine/operators"
-import { layoutText, makeLayer, uid, inks } from "@/engine/scene"
+import {
+  ancestors,
+  childrenOf,
+  inks,
+  isGroup,
+  layoutText,
+  chunkByWords,
+  groupNodes,
+  groupText,
+  addIssue,
+  CLONE_LIMITS,
+  LIMITS,
+  defaultCloner,
+  makeGroup,
+  makeLayer,
+  makeShape,
+  moveNode,
+  shapeKinds,
+  type Layer,
+  type Scene,
+  type ShapeKind,
+} from "@/engine/scene"
 import { sceneParams } from "@/engine/params"
-import { useStore } from "@/state/store"
+import { cloneCount } from "@/engine/cloner"
+import { sceneAlphabet, selectedIds, useStore } from "@/state/store"
+import { runtime } from "@/state/runtime"
 import { cn } from "@/lib/utils"
+import {
+  arrange,
+  clonerFromSelection,
+  deleteSelection,
+  duplicateSelection,
+  groupSelection,
+  moveTo,
+  nodeRole,
+  placeInView,
+  reveal,
+  selectChildren,
+  setCollapsedDeep,
+  soloVisibility,
+  toggleFlag,
+  ungroupSelection,
+  type DropTarget,
+} from "./actions"
 
 const opItems = ops.map((o) => ({ value: o, label: opInfo[o].name }))
+export const MOD = typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌘" : "Ctrl+"
 
-export function LayersPanel() {
+/** Where a new object goes: inside the selected group, or right above the selected object. */
+export function insertionPoint(scene: Scene, selected: string[]): { parent?: string; index: number } {
+  const sel = scene.layers.find((l) => l.id === selected[selected.length - 1])
+  if (!sel) return { index: childrenOf(scene.layers, undefined).length }
+  if (isGroup(sel)) return { parent: sel.id, index: childrenOf(scene.layers, sel.id).length }
+  const sibs = childrenOf(scene.layers, sel.parent)
+  return { parent: sel.parent, index: sibs.findIndex((s) => s.id === sel.id) + 1 }
+}
+
+/**
+ * Visible rows of the tree, top of the list = top of the z-order. With a
+ * query only matching nodes and their ancestors are listed, groups open.
+ */
+function useRows(scene: Scene, query: string) {
+  return useMemo(() => {
+    const q = query.trim().toLocaleLowerCase("ru")
+    let keep: Set<string> | null = null
+    if (q) {
+      keep = new Set()
+      for (const l of scene.layers) {
+        const label = nodeLabel(l).toLocaleLowerCase("ru")
+        if (!label.includes(q) && !(l.type === "letter" && l.char.toLocaleLowerCase("ru") === q)) continue
+        keep.add(l.id)
+        for (const g of ancestors(scene.layers, l.id)) keep.add(g.id)
+      }
+    }
+    const rows: { node: Layer; depth: number }[] = []
+    const walk = (parent: string | undefined, depth: number) => {
+      const kids = childrenOf(scene.layers, parent)
+      for (let i = kids.length - 1; i >= 0; i--) {
+        const n = kids[i]
+        if (keep && !keep.has(n.id)) continue
+        rows.push({ node: n, depth })
+        if (isGroup(n) && (keep || !n.collapsed)) walk(n.id, depth + 1)
+      }
+    }
+    walk(undefined, 0)
+    return rows
+  }, [scene.layers, query])
+}
+
+function TextForm({ onDone }: { onDone: () => void }) {
   const scene = useStore((s) => s.scene)
-  const selected = useStore((s) => s.selected)
-  const alphabet = useStore((s) => s.alphabet)
-  const revision = useStore((s) => s.revision)
-  const { setScene, select, updateLayer } = useStore.getState()
+  const library = useStore((s) => s.library)
+  const sets = useStore((s) => s.sets)
+  const alphabet = useStore(sceneAlphabet)
+  const selected = useStore(useShallow(selectedIds))
   const [text, setText] = useState("")
   const [op, setOp] = useState<Op>("fuse")
-  const [adding, setAdding] = useState(false)
+  const [set, setSet] = useState(scene.set)
+  const { setScene, select } = useStore.getState()
 
-  function typeText(e: React.FormEvent) {
+  const shapes = library.sets[set]?.set.kind === "shapes"
+
+  function submit(e: React.FormEvent) {
     e.preventDefault()
     const value = text.trim()
     if (!value) return
-    const missing = [...new Set([...value.toLocaleUpperCase("ru")].filter((c) => c !== " " && c !== "\n" && !(c in alphabet)))]
-    const color = scene.layers[0]?.color ?? inks[0]
-    const layers = layoutText(value, alphabet, scene.axes, scene.tracking, { op, color }, revision)
-    if (!layers.length) {
-      toast.error("В алфавите нет этих знаков. Доступны прописные латиница и кириллица.")
-      return
-    }
-    setScene((s) => ({ ...s, layers, routes: s.routes.filter((r) => !r.target.startsWith("layer:")) }))
-    select(null)
-    if (missing.length) toast("Пропущены знаки вне алфавита: " + missing.join(" "))
+    const entry = library.sets[set]
+    const abc = entry?.alphabet ?? alphabet
+    const missing = [...new Set([...value.toLocaleUpperCase("ru")].filter((c) => c !== " " && c !== "\n" && !(c in abc)))]
+    const color = scene.layers.find((l) => l.type === "letter")?.color ?? inks[0]
+    const letters = layoutText(value, abc, scene.axes, scene.tracking, { op, color, ...(set !== scene.set ? { set } : {}) }, entry?.version ?? 0)
+    if (!letters.length) return void toast.error("В сете нет этих знаков.")
+    // Geometric letters keep their modules (lines, mosaic, cuts) only drawn one by one: their text is
+    // an ordinary group. Stroke letters fuse into merges of at most LIMITS.mergeChildren, split between words.
+    const chunks = shapes ? [] : chunkByWords(value, abc, LIMITS.mergeChildren)
+    const { parent, index } = insertionPoint(scene, selected)
+    const host = parent ? scene.layers.find((l) => l.id === parent) : undefined
+    const p = isGroup(host) && host.mode === "merge" ? host.parent : parent
+    const issue = addIssue(scene.layers, p, 0, letters.length + (shapes ? 1 : chunks.length + (chunks.length > 1 ? 1 : 0)))
+    if (issue) return void toast.error(issue)
+    // New text lands in the middle of the view; the view widens when the text does not fit.
+    const placed = placeInView(letters)
+    const res = shapes
+      ? groupNodes({ ...scene, layers: [...scene.layers, ...placed] }, placed.map((l) => l.id), "stack", { name: value.slice(0, 24) })
+      : groupText(scene, placed, chunks, value.slice(0, 24))
+    setScene(res.id ? moveNode(res.scene, res.id, p, p === parent ? index : childrenOf(res.scene.layers, p).length) : res.scene)
+    if (res.id) select(res.id)
+    const xs = placed.map((l) => l.x),
+      ys = placed.map((l) => l.y)
+    reveal({ x0: Math.min(...xs) - 3, y0: Math.min(...ys) - 3, x1: Math.max(...xs) + 3, y1: Math.max(...ys) + 3 })
+    if (chunks.length > 1) toast(`Текст разложен на ${chunks.length} сплава по словам: в одном сплаве не больше ${LIMITS.mergeChildren} знаков.`)
+    if (missing.length) toast("Пропущены знаки вне сета: " + missing.join(" "))
+    onDone()
   }
-
-  function addLetter(c: string) {
-    const top = scene.layers.at(-1)
-    const layer = makeLayer(c, {
-      x: top ? top.x + 3 : 0,
-      y: top?.y ?? 0,
-      op: scene.layers.length ? "fuse" : "union",
-      color: top?.color ?? inks[0],
-    })
-    setScene((s) => ({ ...s, layers: [...s.layers, layer] }))
-    select(layer.id)
-    setAdding(false)
-  }
-
-  function move(id: string, dir: 1 | -1) {
-    setScene((s) => {
-      const i = s.layers.findIndex((l) => l.id === id)
-      const j = i + dir
-      if (i < 0 || j < 0 || j >= s.layers.length) return s
-      const layers = [...s.layers]
-      ;[layers[i], layers[j]] = [layers[j], layers[i]]
-      return { ...s, layers }
-    })
-  }
-
-  const rows = [...scene.layers].reverse()
 
   return (
-    <aside className="flex min-h-0 w-full flex-col rounded-xl border bg-card lg:w-64 lg:shrink-0" aria-label="Слои">
-      <form onSubmit={typeText} className="flex flex-col gap-2 border-b p-3">
-        <label htmlFor="type-text" className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Набрать
-        </label>
-        <div className="flex gap-1.5">
-          <Input
-            id="type-text"
-            value={text}
-            maxLength={40}
-            placeholder="Слово или фраза"
-            onChange={(e) => setText(e.target.value)}
-          />
-          <Tooltip>
-            <TooltipTrigger render={<Button type="submit" size="icon" aria-label="Набрать слоями" disabled={!text.trim()} />}>
-              <Type />
-            </TooltipTrigger>
-            <TooltipContent>Разложить текст на слои</TooltipContent>
-          </Tooltip>
-        </div>
-        <Select items={opItems} value={op} onValueChange={(v) => v && setOp(v as Op)}>
-          <SelectTrigger size="sm" className="w-full" aria-label="Оператор между буквами">
+    <form onSubmit={submit} className="flex flex-col gap-3">
+      <label htmlFor="type-text" className="text-sm font-medium">
+        {shapes ? "Текст" : "Текст сплавом"}
+      </label>
+      <Input id="type-text" autoFocus value={text} maxLength={60} placeholder="Слово или фраза" onChange={(e) => setText(e.target.value)} />
+      <div className="grid grid-cols-2 gap-2">
+        <Select items={sets.map((s) => ({ value: s.id, label: s.name }))} value={set} onValueChange={(v) => v && setSet(v)}>
+          <SelectTrigger size="sm" aria-label="Сет">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {sets.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select items={opItems} value={op} onValueChange={(v) => v && setOp(v as Op)} disabled={shapes}>
+          <SelectTrigger size="sm" aria-label="Оператор между буквами">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -109,125 +229,629 @@ export function LayersPanel() {
             })}
           </SelectContent>
         </Select>
-        <ParamSlider
-          def={sceneParams.tracking}
-          value={scene.tracking}
-          onChange={(v) => setScene((s) => ({ ...s, tracking: v }), "tracking")}
-        />
-      </form>
-
-      <div className="flex items-center justify-between px-3 pt-3 pb-1">
-        <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Слои <span className="tabular-nums">· {scene.layers.length}</span>
-        </h2>
-        <Popover open={adding} onOpenChange={setAdding}>
-          <PopoverTrigger render={<Button variant="outline" size="sm" disabled={scene.layers.length >= 32} />}>
-            <Plus data-icon="inline-start" />
-            Буква
-          </PopoverTrigger>
-          <PopoverContent className="w-80" align="end">
-            <GlyphPicker onPick={addLetter} />
-          </PopoverContent>
-        </Popover>
       </div>
+      {shapes && <p className="text-xs text-muted-foreground">Буквы геометрического сета ставятся отдельно, без сплава: так у них работают линии модулей, мозаика и срезы.</p>}
+      <ParamSlider def={sceneParams.tracking} value={scene.tracking} onChange={(v) => setScene((s) => ({ ...s, tracking: v }), "tracking")} />
+      <Button type="submit" disabled={!text.trim()}>
+        <Type data-icon="inline-start" />
+        Добавить текст
+      </Button>
+    </form>
+  )
+}
 
+function AddMenu() {
+  const scene = useStore((s) => s.scene)
+  const sets = useStore((s) => s.sets)
+  const selected = useStore(useShallow(selectedIds))
+  const [panel, setPanel] = useState<"letter" | "text" | null>(null)
+  const [pickSet, setPickSet] = useState<string | null>(null)
+  const { setScene, select } = useStore.getState()
+  const full = scene.layers.length >= LIMITS.nodes
+
+  function insert(node: Layer) {
+    const { parent, index } = insertionPoint(scene, selected)
+    const host = parent ? scene.layers.find((l) => l.id === parent) : undefined
+    // A group cannot go into a merge group: it lands next to it.
+    const p = isGroup(node) && isGroup(host) && host.mode === "merge" ? host.parent : parent
+    const issue = addIssue(scene.layers, p, isGroup(node) ? 0 : 1, 1)
+    if (issue) return void toast.error(issue)
+    const idx = p === parent ? index : childrenOf(scene.layers, p).length
+    setScene((s) => moveNode({ ...s, layers: [...s.layers, node] }, node.id, p, idx))
+    select(node.id)
+  }
+  /** Next to the selected object, or in the middle of the view. */
+  const near = () => {
+    const sel = scene.layers.find((l) => l.id === selected[selected.length - 1])
+    const v = runtime.view
+    return sel && !isGroup(sel) ? { x: sel.x + 3, y: sel.y, color: sel.color } : { x: v?.cx ?? 0, y: v?.cy ?? 0, color: inks[0] }
+  }
+  function addLetter(c: string) {
+    const set = pickSet ?? scene.set
+    insert(makeLayer(c, { ...near(), op: "fuse", ...(set !== scene.set ? { set } : {}) }))
+    setPanel(null)
+  }
+  /** A cloner group with one pattern tile of the geometric set: a ready grid to tweak. */
+  function addCloner() {
+    const cloneIssue = addIssue(scene.layers, undefined, 0, 2)
+    if (cloneIssue) return void toast.error(cloneIssue)
+    const n = near()
+    const g = makeGroup("stack", {
+      name: "Клонер",
+      x: n.x,
+      y: n.y,
+      cloner: { ...defaultCloner, cols: 8, rows: 8, dx: 2.5, dy: 2.5, symmetry: "rotate", pick: "cycle" },
+    })
+    const geo = sets.some((x) => x.id === "geo") ? "geo" : undefined
+    const tile = { ...makeLayer("◜", { x: 0, y: 0, color: n.color, ...(geo && geo !== scene.set ? { set: geo } : {}) }), parent: g.id }
+    const { parent, index } = insertionPoint(scene, selected)
+    const host = parent ? scene.layers.find((l) => l.id === parent) : undefined
+    const p = isGroup(host) && host.mode === "merge" ? host.parent : parent
+    const idx = p === parent ? index : childrenOf(scene.layers, p).length
+    setScene((s) => {
+      const moved = moveNode({ ...s, layers: [...s.layers, g] }, g.id, p, idx)
+      const at = moved.layers.findIndex((l) => l.id === g.id)
+      return { ...moved, layers: [...moved.layers.slice(0, at + 1), tile, ...moved.layers.slice(at + 1)] }
+    })
+    select(g.id)
+  }
+  function addShape(kind: ShapeKind) {
+    const n = near()
+    const dims: Record<ShapeKind, [number, number]> = { rect: [4, 4], ellipse: [4, 4], polygon: [4, 4], star: [4, 4], line: [6, 0.5] }
+    insert(makeShape({ kind, w: dims[kind][0], h: dims[kind][1], sides: kind === "star" ? 5 : 6 }, { ...n, color: n.color === inks[0] ? inks[1] : n.color }))
+  }
+
+  return (
+    <Popover open={panel !== null} onOpenChange={(v) => !v && setPanel(null)}>
+      <DropdownMenu>
+        <DropdownMenuTrigger render={<Button size="sm" disabled={full} />}>
+          <Plus data-icon="inline-start" />
+          Добавить
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuItem onClick={() => setPanel("letter")}>
+            <CaseUpper />
+            Буква…
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setPanel("text")}>
+            <Type />
+            Текст…
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <ShapeIcon kind="rect" />
+              Фигура
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {shapeKinds.map((k) => (
+                <DropdownMenuItem key={k} onClick={() => addShape(k)}>
+                  <ShapeIcon kind={k} />
+                  {shapeNames[k]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => insert(makeGroup("stack", { name: "Группа" }))}>
+            <Folder />
+            Пустая группа
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => insert(makeGroup("merge", { name: "Сплав" }))}>
+            <Combine />
+            Пустой сплав
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={addCloner}>
+            <Grid3x3 />
+            Клонер плиток
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/* The popover hangs from the header, under the add button. */}
+      <PopoverTrigger nativeButton={false} render={<span aria-hidden className="pointer-events-none absolute top-11 right-3 size-0" />} />
+      <PopoverContent className="w-80" align="end">
+        {panel === "letter" && <GlyphPicker set={pickSet ?? scene.set} onSet={setPickSet} onPick={addLetter} />}
+        {panel === "text" && <TextForm onDone={() => setPanel(null)} />}
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+type DragState = { ids: string[]; over: DropTarget | null }
+
+function LayerRow({
+  node: l,
+  depth,
+  scene,
+  active,
+  renaming,
+  drag,
+  setDrag,
+  onPick,
+}: {
+  node: Layer
+  depth: number
+  scene: Scene
+  active: boolean
+  renaming: boolean
+  drag: DragState | null
+  setDrag: (d: DragState | null) => void
+  onPick: (e: React.MouseEvent) => void
+}) {
+  const { updateLayer, set } = useStore.getState()
+  const [name, setName] = useState(nodeLabel(l))
+  const role = nodeRole(scene, l)
+  const Icon = opIcons[l.op]
+  const hiddenBy = !l.visible || ancestors(scene.layers, l.id).some((g) => !g.visible)
+  const lockedBy = ancestors(scene.layers, l.id).some((g) => g.locked)
+  const kids = isGroup(l) ? childrenOf(scene.layers, l.id).length : 0
+  const over = drag?.over?.id === l.id ? drag.over.where : null
+  const setLabel = useStore((s) => (l.type === "letter" && l.set && l.set !== s.scene.set ? s.sets.find((x) => x.id === l.set)?.name : undefined))
+  useEffect(() => setName(nodeLabel(l)), [renaming, l])
+
+  const maskHost = scene.layers.find((g) => g.id === l.parent)
+  const isMask = isGroup(maskHost) && maskHost.mode === "stack" && !!maskHost.mask && childrenOf(scene.layers, maskHost.id)[0]?.id === l.id
+  const sub =
+    l.type === "group"
+      ? l.mode === "merge"
+        ? `Сплав · ${kids}`
+        : l.cloner?.enabled
+          ? `Клонер · ${Math.min(cloneCount(l.cloner), CLONE_LIMITS.maxPerCloner)}${l.mask ? " · маска" : ""}`
+          : `${l.mask ? "Маска" : "Группа"} · ${kids}`
+      : isMask
+        ? "Маска группы"
+        : role === "base"
+        ? "Основа сплава"
+        : role === "operand"
+          ? opInfo[l.op].name
+          : l.type === "letter"
+            ? setLabel ?? "Буква"
+            : "Фигура"
+
+  function onDragOver(e: React.DragEvent) {
+    if (!drag || drag.ids.includes(l.id)) return
+    e.preventDefault()
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const t = (e.clientY - r.top) / r.height
+    const where: DropTarget["where"] = isGroup(l) && t > 0.28 && t < 0.72 ? "inside" : t < 0.5 ? "above" : "below"
+    if (drag.over?.id !== l.id || drag.over.where !== where) setDrag({ ...drag, over: { id: l.id, where } })
+  }
+
+  const rename = () => set({ renaming: l.id })
+
+  return (
+    <li role="treeitem" data-row={l.id} aria-selected={active} aria-level={depth + 1} aria-expanded={isGroup(l) ? !l.collapsed : undefined}>
+      <ContextMenu>
+        <ContextMenuTrigger
+          render={
+            <div
+              draggable={!renaming}
+              onDragStart={(e) => {
+                const ids = active ? selectedIds(useStore.getState()) : [l.id]
+                if (!active) useStore.getState().select(l.id)
+                e.dataTransfer.effectAllowed = "move"
+                e.dataTransfer.setData("text/plain", ids.join(","))
+                setDrag({ ids, over: null })
+              }}
+              onDragOver={onDragOver}
+              onDrop={(e) => {
+                e.preventDefault()
+                if (drag?.over) moveTo(drag.ids, drag.over)
+                setDrag(null)
+              }}
+              onDragEnd={() => setDrag(null)}
+              onClick={onPick}
+              onContextMenu={() => {
+                if (!active) useStore.getState().select(l.id)
+              }}
+              onDoubleClick={rename}
+              className={cn(
+                "group relative flex h-10 cursor-default items-center gap-1.5 rounded-lg pr-1 text-left transition-colors outline-none hover:bg-muted",
+                active && "bg-muted ring-1 ring-primary/40",
+                hiddenBy && "text-muted-foreground",
+                over === "inside" && "bg-primary/10 ring-1 ring-primary",
+              )}
+              style={{ paddingLeft: 4 + depth * 14 }}
+            />
+          }
+        >
+          {Array.from({ length: depth }, (_, k) => (
+            <span key={k} aria-hidden className="pointer-events-none absolute inset-y-0 w-px bg-border" style={{ left: 13 + k * 14 }} />
+          ))}
+          {over === "above" && <span aria-hidden className="pointer-events-none absolute inset-x-1 -top-px h-0.5 rounded bg-primary" />}
+          {over === "below" && <span aria-hidden className="pointer-events-none absolute inset-x-1 -bottom-px h-0.5 rounded bg-primary" />}
+          {isGroup(l) ? (
+            <button
+              type="button"
+              className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background"
+              aria-label={l.collapsed ? "Развернуть" : "Свернуть"}
+              title="Alt-клик — со всеми вложенными группами"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (e.altKey) setCollapsedDeep(l.id, !l.collapsed)
+                else useStore.getState().updateLayersQuiet([{ id: l.id, patch: { collapsed: !l.collapsed || undefined } }])
+              }}
+            >
+              {l.collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+            </button>
+          ) : (
+            <span className="size-5 shrink-0" />
+          )}
+          <span
+            className={cn("flex size-8 shrink-0 items-center justify-center rounded-md border bg-background p-0.5", hiddenBy && "opacity-50")}
+            // Objects are previewed on the scene's own background, as on the canvas.
+            style={isGroup(l) || scene.material.transparent ? undefined : { background: scene.material.background }}
+          >
+            {l.type === "letter" ? (
+              <GlyphThumb char={l.char} set={l.set} color={l.color} axes={l.axes ? { ...scene.axes, ...l.axes } : undefined} />
+            ) : l.type === "shape" ? (
+              <ShapeIcon kind={l.shape.kind} className="size-4" style={{ color: l.color }} />
+            ) : l.mode === "merge" ? (
+              <Combine className="size-4 text-muted-foreground" />
+            ) : l.cloner?.enabled ? (
+              <Grid3x3 className="size-4 text-muted-foreground" />
+            ) : l.mask ? (
+              <SquareDashed className="size-4 text-muted-foreground" />
+            ) : (
+              <Folder className="size-4 text-muted-foreground" />
+            )}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            {renaming ? (
+              <Input
+                autoFocus
+                value={name}
+                maxLength={64}
+                className="h-6 px-1 text-sm"
+                aria-label="Название слоя"
+                onClick={(e) => e.stopPropagation()}
+                onFocus={(e) => e.target.select()}
+                onChange={(e) => setName(e.target.value)}
+                onBlur={() => {
+                  const v = name.trim()
+                  updateLayer(l.id, { name: v && v !== nodeLabel({ ...l, name: undefined }) ? v : undefined })
+                  set({ renaming: null })
+                }}
+                onKeyDown={(e) => {
+                  e.stopPropagation()
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur()
+                  if (e.key === "Escape") set({ renaming: null })
+                }}
+              />
+            ) : (
+              <span className="truncate text-sm leading-tight font-medium">{nodeLabel(l)}</span>
+            )}
+            {role === "operand" && !isMask ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      className="flex w-fit items-center gap-1 truncate rounded text-xs text-muted-foreground hover:text-foreground"
+                      aria-label={"Оператор: " + opInfo[l.op].name + ", сменить"}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  }
+                >
+                  <Icon className="size-3 shrink-0" />
+                  {sub}
+                  <ChevronDown className="size-3 shrink-0 opacity-60" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-48">
+                  {ops.map((o) => {
+                    const I = opIcons[o]
+                    return (
+                      <DropdownMenuItem key={o} onClick={() => updateLayer(l.id, { op: o })}>
+                        <I />
+                        {opInfo[o].name}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">{sub}</span>
+            )}
+          </span>
+          <span className="flex shrink-0 items-center">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={l.locked ? "Открепить" : "Закрепить"}
+              className={cn(!l.locked && "opacity-0 group-hover:opacity-60 focus-visible:opacity-100", lockedBy && !l.locked && "opacity-30")}
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleFlag([l.id], "locked")
+              }}
+            >
+              {l.locked || lockedBy ? <Lock /> : <LockOpen />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={l.visible ? "Скрыть" : "Показать"}
+              className={cn(l.visible && "opacity-0 group-hover:opacity-60 focus-visible:opacity-100")}
+              title="Alt-клик — показать только этот слой"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (e.altKey) soloVisibility(l.id)
+                else toggleFlag(active ? selectedIds(useStore.getState()) : [l.id], "visible")
+              }}
+            >
+              {l.visible ? <Eye /> : <EyeOff />}
+            </Button>
+          </span>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-64">
+          <ContextMenuItem onClick={rename}>
+            <Pencil />
+            Переименовать
+            <ContextMenuShortcut>F2</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={duplicateSelection}>
+            <Copy />
+            Дублировать
+            <ContextMenuShortcut>{MOD}D</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => groupSelection("stack")}>
+            <Folder />
+            Сгруппировать
+            <ContextMenuShortcut>{MOD}G</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => groupSelection("merge")}>
+            <Combine />
+            Объединить в сплав
+            <ContextMenuShortcut>⌥{MOD}G</ContextMenuShortcut>
+          </ContextMenuItem>
+          {!(isGroup(l) && l.mode === "stack" && l.cloner?.enabled) && (
+            <ContextMenuItem onClick={clonerFromSelection}>
+              <Grid3x3 />
+              Сделать клонером
+            </ContextMenuItem>
+          )}
+          {isGroup(l) && (
+            <>
+              <ContextMenuItem onClick={ungroupSelection}>
+                <Ungroup />
+                Разгруппировать
+                <ContextMenuShortcut>⇧{MOD}G</ContextMenuShortcut>
+              </ContextMenuItem>
+              <ContextMenuItem onClick={selectChildren}>Выделить содержимое</ContextMenuItem>
+              {l.mode === "stack" && (
+                <>
+                  <ContextMenuCheckboxItem
+                    checked={!!l.cloner?.enabled}
+                    onCheckedChange={(v) => updateLayer(l.id, { cloner: l.cloner || v ? { ...(l.cloner ?? defaultCloner), enabled: !!v } : undefined })}
+                  >
+                    Клонер
+                  </ContextMenuCheckboxItem>
+                  <ContextMenuCheckboxItem checked={!!l.mask} onCheckedChange={(v) => updateLayer(l.id, { mask: v ? true : undefined })}>
+                    Маска нижним объектом
+                  </ContextMenuCheckboxItem>
+                </>
+              )}
+            </>
+          )}
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => arrange("front")}>
+            <ArrowUpToLine />
+            На передний план
+            <ContextMenuShortcut>]</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => arrange("back")}>
+            <ArrowDownToLine />
+            На задний план
+            <ContextMenuShortcut>[</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => soloVisibility(l.id)}>
+            <Eye />
+            Показать только это
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => toggleFlag(selectedIds(useStore.getState()), "visible")}>
+            {l.visible ? <EyeOff /> : <Eye />}
+            {l.visible ? "Скрыть" : "Показать"}
+            <ContextMenuShortcut>⇧{MOD}H</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => toggleFlag(selectedIds(useStore.getState()), "locked")}>
+            {l.locked ? <LockOpen /> : <Lock />}
+            {l.locked ? "Открепить" : "Закрепить"}
+            <ContextMenuShortcut>⇧{MOD}L</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onClick={deleteSelection}>
+            <Trash2 />
+            Удалить
+            <ContextMenuShortcut>Del</ContextMenuShortcut>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    </li>
+  )
+}
+
+export function LayersPanel() {
+  const scene = useStore((s) => s.scene)
+  const selected = useStore(useShallow(selectedIds))
+  const renaming = useStore((s) => s.renaming)
+  const [query, setQuery] = useState("")
+  const rows = useRows(scene, query)
+  const groups = scene.layers.filter(isGroup)
+  const allCollapsed = groups.length > 0 && groups.every((g) => g.collapsed)
+  const [drag, setDrag] = useState<DragState | null>(null)
+  const anchor = useRef<string | null>(null)
+  const list = useRef<HTMLUListElement>(null)
+  const { select, selectMany, set } = useStore.getState()
+  const primary = scene.layers.find((l) => l.id === selected[selected.length - 1])
+  const canMerge = selected.some((id) => !isGroup(scene.layers.find((l) => l.id === id)))
+
+  // Keep the primary row in view when the selection changes from the canvas.
+  useEffect(() => {
+    if (!primary) return
+    list.current?.querySelector(`[data-row="${primary.id}"]`)?.scrollIntoView({ block: "nearest" })
+  }, [primary])
+
+  function pick(id: string, e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) {
+    if (e.shiftKey && anchor.current) {
+      // Range in list order.
+      const a = rows.findIndex((r) => r.node.id === anchor.current),
+        b = rows.findIndex((r) => r.node.id === id)
+      if (a >= 0 && b >= 0) {
+        selectMany(rows.slice(Math.min(a, b), Math.max(a, b) + 1).map((r) => r.node.id))
+        return
+      }
+    }
+    if (e.metaKey || e.ctrlKey) select(id, "toggle")
+    else select(id)
+    anchor.current = id
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if ((e.target as HTMLElement).closest("input")) return
+    const i = rows.findIndex((r) => r.node.id === primary?.id)
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault()
+      const j = Math.max(0, Math.min(rows.length - 1, (i < 0 ? -1 : i) + (e.key === "ArrowDown" ? 1 : -1)))
+      if (rows[j]) pick(rows[j].node.id, { shiftKey: e.shiftKey, metaKey: false, ctrlKey: false })
+    } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && isGroup(primary)) {
+      e.preventDefault()
+      useStore.getState().updateLayersQuiet([{ id: primary.id, patch: { collapsed: e.key === "ArrowLeft" || undefined } }])
+    } else if (e.key === "F2" || (e.key === "Enter" && primary)) {
+      e.preventDefault()
+      if (primary) set({ renaming: primary.id })
+    }
+  }
+
+  return (
+    <aside className="relative flex min-h-0 w-full flex-col rounded-xl border bg-card lg:w-56 lg:shrink-0 xl:w-72" aria-label="Слои">
+      <div className="flex items-center justify-between gap-1 border-b px-3 py-2">
+        <h2 className="text-sm font-medium">
+          Слои <span className="text-muted-foreground tabular-nums">· {scene.layers.length}</span>
+        </h2>
+        <div className="flex items-center gap-1">
+          {groups.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button variant="ghost" size="icon-sm" aria-label={allCollapsed ? "Развернуть все группы" : "Свернуть все группы"} onClick={() => setCollapsedDeep(undefined, !allCollapsed)} />}
+              >
+                {allCollapsed ? <ChevronsUpDown /> : <ChevronsDownUp />}
+              </TooltipTrigger>
+              <TooltipContent>{allCollapsed ? "Развернуть все группы" : "Свернуть все группы"}</TooltipContent>
+            </Tooltip>
+          )}
+          <AddMenu />
+        </div>
+      </div>
+      <div className="flex items-center gap-0.5 border-b px-2 py-1">
+        <Tooltip>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Сгруппировать" disabled={!selected.length} onClick={() => groupSelection("stack")} />}>
+            <Folder />
+          </TooltipTrigger>
+          <TooltipContent>Группа: объекты рисуются независимо ({MOD}G)</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Объединить в сплав" disabled={!canMerge} onClick={() => groupSelection("merge")} />}>
+            <Combine />
+          </TooltipTrigger>
+          <TooltipContent>Сплав: формы сливаются операторами (⌥{MOD}G)</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Разгруппировать" disabled={!isGroup(primary)} onClick={ungroupSelection} />}>
+            <Ungroup />
+          </TooltipTrigger>
+          <TooltipContent>Разгруппировать (⇧{MOD}G)</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Дублировать" disabled={!selected.length} onClick={duplicateSelection} />}>
+            <Copy />
+          </TooltipTrigger>
+          <TooltipContent>Дублировать ({MOD}D)</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="На передний план" disabled={!selected.length} onClick={() => arrange("front")} />}>
+            <ArrowUpToLine />
+          </TooltipTrigger>
+          <TooltipContent>На передний план (])</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="На задний план" disabled={!selected.length} onClick={() => arrange("back")} />}>
+            <ArrowDownToLine />
+          </TooltipTrigger>
+          <TooltipContent>На задний план ([)</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Удалить" disabled={!selected.length} onClick={deleteSelection} className="ml-auto" />}>
+            <Trash2 />
+          </TooltipTrigger>
+          <TooltipContent>Удалить (Delete)</TooltipContent>
+        </Tooltip>
+      </div>
+      {scene.layers.length > 0 && (
+        <div className="relative border-b px-2 py-1.5">
+          <Search className="pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setQuery("")
+              if (e.key === "Enter" && rows[0]) pick(rows[0].node.id, { shiftKey: false, metaKey: false, ctrlKey: false })
+            }}
+            placeholder="Найти слой"
+            aria-label="Найти слой по названию или букве"
+            className="h-7 pr-7 pl-7 text-sm"
+          />
+          {query && (
+            <Button variant="ghost" size="icon-xs" className="absolute top-1/2 right-3 -translate-y-1/2" aria-label="Очистить поиск" onClick={() => setQuery("")}>
+              <X />
+            </Button>
+          )}
+        </div>
+      )}
       <ScrollArea className="min-h-0 flex-1">
-        {rows.length === 0 ? (
+        {query && rows.length === 0 ? (
+          <p className="p-4 text-center text-sm text-muted-foreground">Ничего не найдено</p>
+        ) : rows.length === 0 ? (
           <Empty className="p-6">
             <EmptyHeader>
               <EmptyTitle>Слоёв пока нет</EmptyTitle>
-              <EmptyDescription>Наберите слово или добавьте букву.</EmptyDescription>
+              <EmptyDescription>Нажмите «Добавить»: буква, текст, фигура или группа.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
-          <ul className="flex flex-col gap-0.5 p-2">
-            {rows.map((l) => {
-              const index = scene.layers.indexOf(l)
-              const base = index === 0
-              const Icon = opIcons[l.op]
-              const active = l.id === selected
-              return (
-                <li key={l.id}>
-                  <div
-                    className={cn(
-                      "group flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-muted",
-                      active && "bg-muted ring-1 ring-primary/40",
-                      !l.visible && "opacity-55",
-                    )}
-                  >
-                    <button
-                      type="button"
-                      className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                      aria-pressed={active}
-                      aria-label={`Слой ${l.char}, ${base ? "основа" : opInfo[l.op].name}`}
-                      onClick={() => select(active ? null : l.id)}
-                    >
-                      <span className="size-8 shrink-0 rounded-md border bg-background p-0.5">
-                        <GlyphThumb char={l.char} color={l.color} axes={l.axes ? { ...scene.axes, ...l.axes } : undefined} />
-                      </span>
-                      <span className="flex min-w-0 flex-col">
-                        <span className="text-sm leading-tight font-medium">{l.char}</span>
-                        <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-                          {!base && <Icon className="size-3" />}
-                          {base ? "Основа" : opInfo[l.op].name}
-                        </span>
-                      </span>
-                    </button>
-                    <div className="flex items-center opacity-70 group-hover:opacity-100 group-focus-within:opacity-100">
-                      <Button variant="ghost" size="icon-xs" aria-label="Выше" disabled={index === scene.layers.length - 1} onClick={() => move(l.id, 1)}>
-                        <ChevronUp />
-                      </Button>
-                      <Button variant="ghost" size="icon-xs" aria-label="Ниже" disabled={index === 0} onClick={() => move(l.id, -1)}>
-                        <ChevronDown />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={l.visible ? "Скрыть" : "Показать"}
-                        onClick={() => updateLayer(l.id, { visible: !l.visible })}
-                      >
-                        {l.visible ? <Eye /> : <EyeOff />}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label="Дублировать"
-                        disabled={scene.layers.length >= 32}
-                        onClick={() => {
-                          const copy = { ...l, id: uid(), x: l.x + 1, y: l.y - 1 }
-                          setScene((s) => {
-                            const layers = [...s.layers]
-                            layers.splice(index + 1, 0, copy)
-                            return { ...s, layers }
-                          })
-                          select(copy.id)
-                        }}
-                      >
-                        <Copy />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label="Удалить слой"
-                        onClick={() => {
-                          setScene((s) => ({
-                            ...s,
-                            layers: s.layers.filter((x) => x.id !== l.id),
-                            routes: s.routes.filter((r) => !r.target.startsWith("layer:" + l.id)),
-                          }))
-                          if (active) select(null)
-                        }}
-                      >
-                        <Trash2 />
-                      </Button>
-                    </div>
-                  </div>
-                </li>
-              )
-            })}
+          <ul
+            ref={list}
+            tabIndex={0}
+            role="tree"
+            aria-multiselectable
+            aria-label="Дерево слоёв. Стрелки — выбор, Shift — диапазон, ⌘ — добавить к выбору, F2 — переименовать, перетаскивание — порядок и вложение в группы."
+            className="flex flex-col gap-0.5 p-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            onKeyDown={onKeyDown}
+            onDragLeave={(e) => {
+              if (drag && !list.current?.contains(e.relatedTarget as Node)) setDrag({ ...drag, over: null })
+            }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) select(null)
+            }}
+          >
+            {rows.map(({ node, depth }) => (
+              <LayerRow
+                key={node.id}
+                node={node}
+                depth={depth}
+                scene={scene}
+                active={selected.includes(node.id)}
+                renaming={renaming === node.id}
+                drag={drag}
+                setDrag={setDrag}
+                onPick={(e) => pick(node.id, e)}
+              />
+            ))}
           </ul>
         )}
       </ScrollArea>
+      <p className="border-t px-3 py-2 text-xs text-muted-foreground">
+        Перетащите слой на группу, чтобы вложить. Двойной клик — переименовать, правая кнопка — действия, Alt-клик по глазу — только этот слой.
+      </p>
     </aside>
   )
 }

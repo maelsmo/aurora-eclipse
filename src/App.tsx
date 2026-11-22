@@ -9,17 +9,21 @@ import { Badge } from "@/components/ui/badge"
 import { Studio } from "@/components/studio/Studio"
 import { Constructor } from "@/components/constructor/Constructor"
 import { Collection } from "@/components/collection/Collection"
-import { SceneThumb } from "@/components/shared/Thumbs"
+import { SceneThumb, useThemeInk } from "@/components/shared/Thumbs"
 import { SaveDialog, ExportDialog } from "@/components/shared/Dialogs"
 import { AboutDialog } from "@/components/shared/AboutDialog"
 import { presets } from "@/engine/presets"
-import { useStore, type Tab } from "@/state/store"
+import { selectedIds, useStore, type Tab } from "@/state/store"
+import { arrange, deleteSelection, duplicateSelection, groupSelection, selectAll, toggleFlag, ungroupSelection } from "@/components/studio/actions"
+import { shortcutKey } from "@/lib/keys"
 
 function Brand() {
+  // The mark is drawn in the theme's ink, so it reads on light and dark headers.
+  const ink = useThemeInk()
   const mark = useMemo(() => {
     const s = presets[0].make()
-    return { ...s, material: { ...s.material, transparent: true } }
-  }, [])
+    return { ...s, material: { ...s.material, transparent: true }, layers: s.layers.map((l) => ({ ...l, color: ink })) }
+  }, [ink])
   return (
     <div className="flex items-center gap-2.5">
       <span className="size-9 shrink-0">
@@ -46,10 +50,47 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return
       const el = e.target as HTMLElement
-      if (el.closest("input, textarea, [contenteditable]")) return
-      const k = e.key.toLowerCase()
+      if (el.closest("input, textarea, [contenteditable], [role=dialog], [role=menu]")) return
+      const studio = useStore.getState().tab === "studio"
+      // Works with a Russian layout and with ⌥ (which turns G into ©); Latin layouts keep their own letters.
+      const k = shortcutKey(e)
+      // Scene shortcuts without modifiers (Figma-like).
+      if (studio && !(e.metaKey || e.ctrlKey || e.altKey)) {
+        if (k === "delete" || k === "backspace") {
+          e.preventDefault()
+          deleteSelection()
+        } else if (k === "escape") useStore.getState().select(null)
+        else if (e.key === "]") arrange("front")
+        else if (e.key === "[") arrange("back")
+        else if (k === "f2") {
+          const id = useStore.getState().selected.at(-1)
+          if (id) useStore.getState().set({ renaming: id })
+        }
+        return
+      }
+      if (!(e.metaKey || e.ctrlKey)) return
+      if (studio && k === "g") {
+        e.preventDefault()
+        if (e.shiftKey) ungroupSelection()
+        else groupSelection(e.altKey ? "merge" : "stack")
+        return
+      }
+      if (studio && k === "d") {
+        e.preventDefault()
+        duplicateSelection()
+        return
+      }
+      if (studio && k === "a" && !e.shiftKey) {
+        e.preventDefault()
+        selectAll()
+        return
+      }
+      if (studio && e.shiftKey && (k === "h" || k === "l")) {
+        e.preventDefault()
+        toggleFlag(selectedIds(useStore.getState()), k === "h" ? "visible" : "locked")
+        return
+      }
       if (k === "z") {
         e.preventDefault()
         if (e.shiftKey) redo()

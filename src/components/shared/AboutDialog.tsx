@@ -1,12 +1,23 @@
 import { useMemo } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SceneThumb } from "./Thumbs"
 import { compileGlyph } from "@/engine/compile"
 import { defaultAxes } from "@/engine/axes"
 import { makeLayer, makeScene } from "@/engine/scene"
 import { CAP } from "@/engine/grid"
 import { useStore } from "@/state/store"
+
+const geoRules = [
+  ["Плита", "Прописная — плита из клеток 2 × 2 (широкие — 3 × 2), клетка — 2,5 модуля, высота прописной — две клетки. Буква — то, что осталось от плиты после теней."],
+  ["Клетки", "Краска — только клетки: квадрат, четверть круга (угол скруглён на всю сторону) или чаша с половинным радиусом. Те же клетки сет даёт как плитки для узоров."],
+  ["Тени", "Просвет — тень шириной в один модуль, как штрих основного сета: зрачок (круглое отверстие), залив (прорезь от края с круглым концом) или клин (прямой срез под 45°)."],
+  ["Круглое и острое", "Круглые и прямые буквы берут зрачки и заливы, диагональные — клинья. U — круглая, V — её острая пара; у S заливы, у Z клинья."],
+  ["Затмение", "C, G и Э — диск, на который зашла тень побольше: остаётся серп. O — кольцо: тень стоит точно в центре."],
+  ["Полосы", "Каждая клетка помнит направление: стебли — вертикали, перекладины — горизонтали, скругления — дуги. Так рождается режим «Линии»."],
+  ["Вариации", "Зазор модулей раскрывает мозаику клеток, окончания 0 делают всё круглое гранёным (круг — ромб, серп — шеврон, зрачок — ромбик), контур обводит силуэт."],
+]
 
 const rules = [
   ["Сетка", "Высота прописной — 5 модулей: штрих, просвет, штрих, просвет, штрих. Узлы стоят с шагом 0,5 модуля."],
@@ -21,18 +32,18 @@ const rules = [
 const W = 260,
   H = 230
 
-function Figure({ char }: { char: string }) {
-  const alphabet = useStore((s) => s.alphabet)
-  const revision = useStore((s) => s.revision)
-  const g = compileGlyph(char, alphabet, defaultAxes, revision)
+function Figure({ char, set }: { char: string; set?: string }) {
+  const entry = useStore((s) => s.library.sets[set && s.library.sets[set] ? set : s.library.fallback])
+  const geo = entry.set.kind === "shapes"
+  const g = compileGlyph(char, entry.alphabet, defaultAxes, entry.version)
   const ax = (g.box.x0 + g.box.x1) / 2
   const scene = useMemo(
     () =>
       makeScene({
-        layers: [makeLayer(char, { x: ax, y: CAP / 2, color: "#C9C3EE" })],
+        layers: [makeLayer(char, { x: ax, y: CAP / 2, color: "#C9C3EE", set: entry.set.id })],
         material: { ...makeScene().material, transparent: true },
       }),
-    [char, ax],
+    [char, ax, entry.set.id],
   )
   const s = Math.min(W / (g.box.x1 - g.box.x0 + 2.4), H / 7.4)
   const cx = ax,
@@ -47,6 +58,11 @@ function Figure({ char }: { char: string }) {
         {[0, CAP / 2, CAP].map((y) => (
           <line key={y} x1={0} x2={W} y1={Y(y)} y2={Y(y)} stroke="var(--foreground)" strokeOpacity={0.18} strokeDasharray="3 4" />
         ))}
+        {geo &&
+          Array.from({ length: Math.round((g.box.x1 - g.box.x0) / 2.5) + 1 }, (_, i) => g.box.x0 + i * 2.5).map((x) => (
+            <line key={"c" + x} x1={X(x)} x2={X(x)} y1={Y(0)} y2={Y(CAP)} stroke="var(--foreground)" strokeOpacity={0.35} strokeDasharray="2 3" />
+          ))}
+        {geo && <rect x={X(g.box.x0)} y={Y(CAP)} width={X(g.box.x1) - X(g.box.x0)} height={Y(0) - Y(CAP)} fill="none" stroke="var(--foreground)" strokeOpacity={0.35} strokeDasharray="2 3" />}
         {g.prims.map((p, i) => {
           if (p.kind === "stroke")
             return (
@@ -65,6 +81,29 @@ function Figure({ char }: { char: string }) {
   )
 }
 
+function RuleBlock({ rules, figures, set }: { rules: string[][]; figures: string[]; set?: string }) {
+  return (
+    <div className="flex flex-col gap-4 md:flex-row">
+      <div className="flex flex-row gap-3 md:flex-col">
+        {figures.map((c) => (
+          <Figure key={c} char={c} set={set} />
+        ))}
+      </div>
+      <ol className="flex flex-col gap-3">
+        {rules.map(([title, text], i) => (
+          <li key={title} className="flex gap-3">
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium tabular-nums">{i + 1}</span>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium">{title}</span>
+              <span className="text-sm text-muted-foreground">{text}</span>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
 export function AboutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -72,31 +111,27 @@ export function AboutDialog({ open, onOpenChange }: { open: boolean; onOpenChang
         <DialogHeader>
           <DialogTitle>Система построения</DialogTitle>
           <DialogDescription>
-            Каждая буква — набор модулей на сетке. Шейдер считает расстояние до них и до соседних букв, поэтому одни и те же
-            правила строят знак и его сочетания: слияние, затмение, врезку и вырезание.
+            Каждая буква — набор модулей на сетке. Шейдер считает расстояние до них и до соседних объектов, поэтому одни и те
+            же правила строят знак и его сочетания: слияние, затмение, врезку и вырезание. Два встроенных сета строятся по
+            разным системам.
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="max-h-[70dvh]">
-          <div className="flex flex-col gap-4 md:flex-row">
-            <div className="flex flex-row gap-3 md:flex-col">
-              <Figure char="E" />
-              <Figure char="A" />
-            </div>
-            <ol className="flex flex-col gap-3">
-              {rules.map(([title, text], i) => (
-                <li key={title} className="flex gap-3">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium tabular-nums">
-                    {i + 1}
-                  </span>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium">{title}</span>
-                    <span className="text-sm text-muted-foreground">{text}</span>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </ScrollArea>
+        <Tabs defaultValue="strokes" className="gap-3">
+          <TabsList>
+            <TabsTrigger value="strokes">Основной сет</TabsTrigger>
+            <TabsTrigger value="geo">Геометрия</TabsTrigger>
+          </TabsList>
+          <TabsContent value="strokes">
+            <ScrollArea className="max-h-[64dvh]">
+              <RuleBlock rules={rules} figures={["E", "A"]} />
+            </ScrollArea>
+          </TabsContent>
+          <TabsContent value="geo">
+            <ScrollArea className="max-h-[64dvh]">
+              <RuleBlock rules={geoRules} figures={["C", "R"]} set="geo" />
+            </ScrollArea>
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   )

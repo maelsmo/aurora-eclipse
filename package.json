@@ -13,13 +13,12 @@
     "@base-ui/react": "^1.9.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@tailwindcss/vite": "^4.0.0",
-    "@types/d3-contour": "^3.0.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cn": "^0.5.2",
-    "d3-contour": "^4.0.3",
-    "fit-curve": "^0.2.0",
     "lucide-react": "^1.75.0",
+    "matter-js": "^0.20.0",
+    "mediabunny": "^1.65.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "shadcn": "^4.23.0",
@@ -30,6 +29,7 @@
     "zustand": "^5.1.0"
   },
   "devDependencies": {
+    "@types/matter-js": "^0.20.2",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

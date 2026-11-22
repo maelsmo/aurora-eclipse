@@ -1,9 +1,10 @@
 // Turns the stored scene into the effective scene of one frame:
-// modulation routes first, then layer motion.
-import { paramDef, type LayerNumKey, type MaterialNumKey, type WarpKey } from "./params"
+// modulation routes first, then motion. Nothing in the stored scene is mutated.
+import { paramDef, parseTarget, readNodeParam, readPath, writePath, type ParamDef } from "./params"
 import type { AxisKey } from "./axes"
-import type { Layer, Scene } from "./scene"
-import type { Signals } from "./signals"
+import type { Layer, Route, Scene } from "./scene/types"
+import { parentXf, xfApply, xfInvert } from "./scene/tree"
+import { signalInfo, type Signals } from "./signals"
 import { noise2 } from "./frame"
 import { clamp } from "./sdf"
 
@@ -12,46 +13,74 @@ export function modulate(base: number, amount: number, signal: number, min: numb
   return clamp(base + amount * (max - min) * signal, min, max)
 }
 
-export function applyRoutes(scene: Scene, signals: Signals): Scene {
+/** Applies one route contribution according to the parameter mode. */
+function apply(def: ParamDef, base: number, amount: number, v: number) {
+  if (def.mode === "offset") return base + amount * (def.max - def.min) * 0.25 * v
+  return modulate(base, amount, v, def.min, def.max)
+}
+
+/** Per-route memory: gates with hysteresis. */
+export type RouteState = Map<string, boolean>
+
+const HYSTERESIS = 0.05
+
+/** Signal value of a route after inversion and the threshold gate. */
+export function routeSignal(r: Route, signals: Signals, state?: RouteState) {
+  let v = signals[r.source] ?? 0
+  if (r.invert) v = signalInfo[r.source].bipolar ? -v : 1 - v
+  if (r.threshold === undefined) return v
+  const was = state?.get(r.id) ?? false
+  const on = was ? v > r.threshold - HYSTERESIS : v > r.threshold + HYSTERESIS
+  state?.set(r.id, on)
+  return on ? 1 : 0
+}
+
+export function applyRoutes(scene: Scene, signals: Signals, state?: RouteState): Scene {
   if (!scene.routes.length) return scene
   const s: Scene = {
     ...scene,
     axes: { ...scene.axes },
     warp: { ...scene.warp },
     material: { ...scene.material },
-    layers: scene.layers.map((l) => ({ ...l, axes: l.axes ? { ...l.axes } : undefined })),
+    look: { ...scene.look },
+    ...(scene.physics ? { physics: { ...scene.physics } } : {}),
   }
+  let layers: Layer[] | null = null
+  const index = new Map(scene.layers.map((l, i) => [l.id, i]))
   for (const r of scene.routes) {
     const def = paramDef(r.target)
-    if (!def) continue
-    const v = signals[r.source] ?? 0
-    const [head, key] = r.target.split(".")
-    if (head === "axes") {
-      const k = key as AxisKey
-      s.axes[k] = modulate(scene.axes[k], r.amount, v, def.min, def.max)
-      // Layer overrides of the same axis move together with the global value.
-      for (const l of s.layers)
-        if (l.axes?.[k] !== undefined)
-          l.axes[k] = modulate(l.axes[k]!, r.amount, v, def.min, def.max)
-    } else if (head === "warp") {
-      const k = key as WarpKey
-      s.warp[k] = modulate(scene.warp[k], r.amount, v, def.min, def.max)
-    } else if (head === "material") {
-      const k = key as MaterialNumKey
-      s.material[k] = modulate(scene.material[k], r.amount, v, def.min, def.max)
-    } else if (head === "scene" && (key === "speed" || key === "tracking")) {
-      s[key] = modulate(scene[key], r.amount, v, def.min, def.max)
-    } else if (head.startsWith("layer:")) {
-      const id = head.slice(6)
-      const l = s.layers.find((x) => x.id === id)
-      if (!l) continue
-      const k = key as LayerNumKey
-      // Position and rotation are offsets: they are not clamped to a range.
-      if (k === "x" || k === "y" || k === "rotation")
-        l[k] = l[k] + r.amount * (def.max - def.min) * 0.25 * v
-      else l[k] = modulate(l[k], r.amount, v, def.min, def.max)
+    const t = parseTarget(r.target)
+    if (!def || !t) continue
+    const v = routeSignal(r, signals, state)
+    if (t.scope === "node") {
+      const i = index.get(t.id)
+      if (i === undefined) continue
+      layers ??= [...scene.layers]
+      const n = layers[i]
+      const base = readNodeParam(s, n, t.path)
+      if (base === undefined) continue
+      layers[i] = writePath(n, t.path, apply(def, base, r.amount, v))
+      continue
     }
+    if (t.scope === "scene") {
+      const k = t.path[0]
+      if (k === "speed" || k === "tracking") s[k] = apply(def, scene[k], r.amount, v)
+      continue
+    }
+    const base = readPath(s[t.scope], t.path)
+    if (base === undefined || !s[t.scope]) continue
+    const next = apply(def, base, r.amount, v)
+    if (t.scope === "axes") {
+      const k = t.path[0] as AxisKey
+      s.axes[k] = next
+      // Letter overrides of the same axis move together with the global value.
+      layers ??= [...scene.layers]
+      layers = layers.map((l) =>
+        l.type === "letter" && l.axes?.[k] !== undefined ? { ...l, axes: { ...l.axes, [k]: apply(def, l.axes[k]!, r.amount, v) } } : l,
+      )
+    } else (s[t.scope] as Record<string, unknown>)[t.path[0]] = next
   }
+  if (layers) s.layers = layers
   return s
 }
 
@@ -65,16 +94,15 @@ export const motionNames: Record<Layer["motion"]["type"], string> = {
   avoid: "Избегать курсора",
 }
 
-/** Per-layer physical state for pointer-driven motion. */
+/** Per-node physical state for pointer-driven motion. */
 export type MotionState = Map<string, { x: number; y: number; vx: number; vy: number }>
 
-export function applyMotion(
-  scene: Scene,
-  time: number,
-  dt: number,
-  pointer: [number, number] | null,
-  state: MotionState,
-): Scene {
+/**
+ * Motion of every node in its parent's coordinates. Orbit circles a sibling
+ * (the one below by default); follow / avoid see the pointer through the
+ * inverse parent transform.
+ */
+export function applyMotion(scene: Scene, time: number, dt: number, pointer: [number, number] | null, state: MotionState): Scene {
   if (!scene.layers.some((l) => l.motion.type !== "none")) {
     state.clear()
     return scene
@@ -87,8 +115,15 @@ export function applyMotion(
     const out = { ...l }
     switch (m.type) {
       case "orbit": {
-        // Transit around another layer: an ellipse flattened by `amount`.
-        const target = (m.target && base.get(m.target)) || scene.layers[i - 1]
+        // Transit around a sibling: an ellipse flattened by `amount`.
+        const t = m.target ? base.get(m.target) : undefined
+        let target = t && t.parent === l.parent ? t : undefined
+        if (!target)
+          for (let j = i - 1; j >= 0; j--)
+            if (scene.layers[j].parent === l.parent) {
+              target = scene.layers[j]
+              break
+            }
         const cx = target ? target.x : l.x,
           cy = target ? target.y : l.y
         const rx = target ? Math.hypot(l.x - cx, l.y - cy) || 3 : 3
@@ -124,8 +159,9 @@ export function applyMotion(
         let fx = -st.x * 8,
           fy = -st.y * 8
         if (pointer) {
-          const px = pointer[0] - (l.x + st.x),
-            py = pointer[1] - (l.y + st.y)
+          const local = l.parent ? xfApply(xfInvert(parentXf(scene.layers, l.id)), pointer[0], pointer[1]) : pointer
+          const px = local[0] - (l.x + st.x),
+            py = local[1] - (l.y + st.y)
           const dist = Math.hypot(px, py) || 1
           if (m.type === "follow") {
             fx += px * 6 * m.amount

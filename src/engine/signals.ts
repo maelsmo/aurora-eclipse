@@ -1,12 +1,14 @@
 // Environment signals: time oscillators, pointer and microphone.
 import { noise2 } from "./frame"
-import type { Lfo, SignalId } from "./scene"
+import type { Lfo, SignalId } from "./scene/types"
 
 export type Signals = Record<SignalId, number>
 
 export const signalInfo: Record<SignalId, { name: string; group: string; bipolar: boolean }> = {
   lfo1: { name: "Ритм 1", group: "Время", bipolar: true },
   lfo2: { name: "Ритм 2", group: "Время", bipolar: true },
+  lfo3: { name: "Ритм 3", group: "Время", bipolar: true },
+  lfo4: { name: "Ритм 4", group: "Время", bipolar: true },
   pointerX: { name: "Курсор X", group: "Курсор", bipolar: true },
   pointerY: { name: "Курсор Y", group: "Курсор", bipolar: true },
   pointerNear: { name: "Близость курсора", group: "Курсор", bipolar: false },
@@ -47,6 +49,8 @@ export function lfoValue(l: Lfo, time: number, seed = 0) {
 export const emptySignals = (): Signals => ({
   lfo1: 0,
   lfo2: 0,
+  lfo3: 0,
+  lfo4: 0,
   pointerX: 0,
   pointerY: 0,
   pointerNear: 0,

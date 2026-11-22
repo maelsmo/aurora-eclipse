@@ -5,12 +5,13 @@ import { compileGlyph, glyphAdvance, glyphPrims } from "@/engine/compile"
 import { makeLayer, makeScene } from "@/engine/scene"
 import { CAP, OVERHANG, snap } from "@/engine/grid"
 import type { ArcDef, PrimDef, Vec } from "@/engine/types"
-import { useStore } from "@/state/store"
-import { editAxes, editTarget, withPrims, type Tool } from "./editing"
+import { isGeo } from "@/engine/types"
+import { editingAlphabet, useStore } from "@/state/store"
+import { editAxes, editTarget, withPrims, type Tool, movePrim, geoPath, isGeoTool, geoFromDrag, type GeoTool } from "./editing"
 
 type Handle = "a" | "b" | "c" | "r" | "a0" | "a1" | "body" | "adv"
 type Drag = { index: number; handle: Handle; start: Vec; prim: PrimDef }
-type Draft = { kind: "stroke" | "slot" | "arc"; a: Vec; b: Vec }
+type Draft = { kind: "stroke" | "slot" | "arc" | GeoTool; a: Vec; b: Vec }
 
 const DEG = Math.PI / 180
 const SKEL = "var(--foreground)"
@@ -42,8 +43,9 @@ export function GlyphEditor({
   onSelect: (i: number | null) => void
 }) {
   const editing = useStore((s) => s.editing)
-  const alphabet = useStore((s) => s.alphabet)
-  const revision = useStore((s) => s.revision)
+  const alphabet = useStore(editingAlphabet)
+  const library = useStore((s) => s.library)
+  const editingSet = useStore((s) => s.editingSet)
   const studioAxes = useStore((s) => s.scene.axes)
   const setGlyph = useStore((s) => s.setGlyph)
   const { target, def } = editTarget(editing, alphabet)
@@ -96,13 +98,16 @@ export function GlyphEditor({
     if (!r || !size.w) return
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     r.resize(size.w * dpr, size.h * dpr)
-    const g = compileGlyph(editing, alphabet, axes, revision)
-    const ax = (g.box.x0 + g.box.x1) / 2
+    const entry = library.sets[editingSet]
+    const g = compileGlyph(editing, alphabet, axes, entry?.version ?? 0)
+    // The layer sits at the glyph's anchor so glyph coordinates equal world ones (tiles turn about their centre).
+    const [ax, ay] = g.anchor ?? [(g.box.x0 + g.box.x1) / 2, CAP / 2]
     const scene = makeScene({
       axes,
-      layers: [makeLayer(editing, { x: ax, y: CAP / 2, color: "#C9C3EE" })],
+      set: editingSet,
+      layers: [makeLayer(editing, { x: ax, y: ay, color: "#C9C3EE" })],
     })
-    const frame = buildFrame(scene, alphabet, revision, 0, [1e4, 1e4])
+    const frame = buildFrame(scene, library, 0, [1e4, 1e4])
     const cx = bx0 + (size.w / 2 - offX) / s,
       cy = by1 - (size.h / 2 - offY) / s
     r.render(frame, { ...scene.material, transparent: true }, { cx, cy, scale: s * dpr })
@@ -135,7 +140,7 @@ export function GlyphEditor({
       onSelect(own.length)
       return
     }
-    setDraft({ kind: tool, a: n, b: n })
+    if (tool === "stroke" || tool === "arc" || tool === "slot" || isGeoTool(tool)) setDraft({ kind: tool, a: n, b: n })
   }
 
   function onPointerMove(e: React.PointerEvent<SVGSVGElement>) {
@@ -173,16 +178,24 @@ export function GlyphEditor({
           next[drag.index] = { ...q, a1: a }
         }
       } else next[drag.index] = { ...q, c: [q.c[0] + d[0], q.c[1] + d[1]] }
-    } else {
+    } else if (q.kind === "dot" || q.kind === "hole") {
       next[drag.index] = { ...q, c: drag.handle === "c" ? n : [q.c[0] + d[0], q.c[1] + d[1]] }
-    }
+    } else if (q.kind === "box" && (drag.handle === "a" || drag.handle === "b")) {
+      next[drag.index] = { ...q, [drag.handle]: n }
+    } else next[drag.index] = movePrim(q, d)
     commit(next, key)
   }
 
   function onPointerUp() {
     if (draft) {
       const { kind, a, b } = draft
-      if (kind === "arc") {
+      if (isGeoTool(kind)) {
+        const p = geoFromDrag(kind, a, b)
+        if (p) {
+          commit([...own, p])
+          onSelect(own.length)
+        }
+      } else if (kind === "arc") {
         const r = Math.max(0.5, snap(Math.hypot(b[0] - a[0], b[1] - a[1]), 0.5))
         commit([...own, { kind: "arc", c: a, r, a0: 0, a1: 180 }])
         onSelect(own.length)
@@ -209,10 +222,8 @@ export function GlyphEditor({
         ArrowUp: [0, step],
         ArrowDown: [0, -step],
       }[e.key] as Vec
-      const q = own[selected]
-      const move = (v: Vec): Vec => [v[0] + d[0], v[1] + d[1]]
       const next = [...own]
-      next[selected] = "c" in q ? { ...q, c: move(q.c) } : { ...q, a: move(q.a), b: move(q.b) }
+      next[selected] = movePrim(own[selected], d)
       commit(next, "nudge:" + target + selected)
     } else if (e.key === "Escape") onSelect(null)
   }
@@ -275,6 +286,19 @@ export function GlyphEditor({
           </g>
         )
       }
+      case "box":
+      case "ellipse":
+      case "sector":
+      case "poly": {
+        const d = geoPath(p, (x, y) => [X(x), Y(y)], s)
+        return (
+          <g key={(ghost ? "g" : "p") + i} opacity={op}>
+            <path {...(ghost ? {} : body)} d={d} fill={ghost ? "none" : "transparent"} stroke={stroke} strokeWidth={w} strokeDasharray={p.neg || ghost ? "5 4" : undefined} />
+            {p.kind === "box" && sel && handle("a", p.a[0], p.a[1])}
+            {p.kind === "box" && sel && handle("b", p.b[0], p.b[1])}
+          </g>
+        )
+      }
       default: {
         const r = (p.kind === "dot" ? 0.5 : 0.3) * (p.s ?? 1) * s
         return (
@@ -334,7 +358,12 @@ export function GlyphEditor({
           {basePrims.map((p, i) => skeleton(p, i, true))}
           {own.map((p, i) => skeleton(p, i, false))}
           {draft &&
-            (draft.kind === "arc" ? (
+            (isGeoTool(draft.kind) ? (
+              (() => {
+                const p = geoFromDrag(draft.kind, draft.a, draft.b)
+                return p && isGeo(p) ? <path d={geoPath(p, (x, y) => [X(x), Y(y)], s)} fill={ACCENT} fillOpacity={0.15} stroke={ACCENT} strokeDasharray="4 3" pointerEvents="none" /> : null
+              })()
+            ) : draft.kind === "arc" ? (
               <circle cx={X(draft.a[0])} cy={Y(draft.a[1])} r={Math.max(0.5, snap(Math.hypot(draft.b[0] - draft.a[0], draft.b[1] - draft.a[1]), 0.5)) * s} fill="none" stroke={ACCENT} strokeDasharray="4 3" pointerEvents="none" />
             ) : (
               <line x1={X(draft.a[0])} y1={Y(draft.a[1])} x2={X(draft.b[0])} y2={Y(draft.b[1])} stroke={ACCENT} strokeWidth={s} strokeOpacity={0.35} strokeLinecap="round" pointerEvents="none" />

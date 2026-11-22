@@ -1,6 +1,10 @@
 // Registry of every numeric parameter: labels, ranges and modulation targets.
+// A target is a path: "axes.weight", "look.line", "layer:<id>.x",
+// "layer:<id>.look.line", "layer:<id>.shape.w", "layer:<id>.cloner.dx",
+// "layer:<id>.cloner.effectors.<effector id>.amount"… parseTarget() splits it.
+// Inside arrays a path segment names the element by its id.
 import type { AxisKey } from "./axes"
-import type { Material, Warp, Layer } from "./scene"
+import type { Cloner, Effector, Layer, Look, Material, Physics, Scene, ShapeDef, Warp } from "./scene/types"
 
 export type ParamDef = {
   label: string
@@ -9,6 +13,8 @@ export type ParamDef = {
   step: number
   unit?: string
   hint?: string
+  /** clamp: modulation stays inside [min, max]; offset: it adds freely (positions, angles). */
+  mode?: "clamp" | "offset"
 }
 
 export const axisParams: Record<AxisKey, ParamDef> = {
@@ -25,20 +31,23 @@ export const axisParams: Record<AxisKey, ParamDef> = {
   slant: { label: "Наклон", min: -20, max: 20, step: 0.5, unit: "°" },
 }
 
-export type LayerNumKey = "x" | "y" | "scale" | "rotation" | "k" | "gap" | "t"
+export type LayerNumKey = "x" | "y" | "scale" | "rotation" | "k" | "gap" | "t" | "opacity"
 export const layerParams: Record<LayerNumKey, ParamDef> = {
-  x: { label: "X", min: -30, max: 30, step: 0.05, unit: "m" },
-  y: { label: "Y", min: -20, max: 20, step: 0.05, unit: "m" },
+  x: { label: "X", min: -30, max: 30, step: 0.05, unit: "m", mode: "offset" },
+  y: { label: "Y", min: -20, max: 20, step: 0.05, unit: "m", mode: "offset" },
   scale: { label: "Масштаб", min: 0.2, max: 4, step: 0.01 },
-  rotation: { label: "Поворот", min: -180, max: 180, step: 1, unit: "°" },
+  rotation: { label: "Поворот", min: -180, max: 180, step: 1, unit: "°", mode: "offset" },
   k: { label: "Мягкость", min: 0, max: 3, step: 0.01, unit: "m", hint: "Радиус слияния или сглаживания" },
   gap: { label: "Просвет", min: -0.5, max: 1.5, step: 0.01, unit: "m", hint: "Зазор между буквами" },
   t: { label: "Доля", min: 0, max: 1, step: 0.01, hint: "Положение между нижними слоями и этой буквой" },
+  opacity: { label: "Прозрачность", min: 0, max: 1, step: 0.01 },
 }
 
-type NumKeys<T> = { [K in keyof T]: T[K] extends number ? K : never }[keyof T]
+type NumKeys<T> = { [K in keyof T]-?: T[K] extends number ? K : never }[keyof T]
 export type WarpKey = NumKeys<Warp>
 export type MaterialNumKey = NumKeys<Material>
+export type LookNumKey = NumKeys<Look>
+export type ShapeNumKey = NumKeys<ShapeDef>
 
 export const warpParams: Record<WarpKey, ParamDef> = {
   wave: { label: "Волна", min: 0, max: 1.5, step: 0.01, unit: "m" },
@@ -51,15 +60,21 @@ export const warpParams: Record<WarpKey, ParamDef> = {
   pointerRadius: { label: "Радиус линзы", min: 0.5, max: 10, step: 0.1, unit: "m" },
 }
 
-export const materialParams: Partial<Record<MaterialNumKey, ParamDef>> = {
+export const lookParams: Record<LookNumKey, ParamDef> = {
   line: { label: "Толщина линии", min: 0.02, max: 0.8, step: 0.01, unit: "m" },
   spacing: { label: "Шаг колец", min: 0.08, max: 1.5, step: 0.01, unit: "m" },
   rings: { label: "Число колец", min: 1, max: 30, step: 1 },
   dot: { label: "Шаг растра", min: 0.08, max: 1, step: 0.01, unit: "m" },
+  stripes: { label: "Полос на модуль", min: 0.4, max: 8, step: 0.1, hint: "Частота полос: 1,6 — четыре линии на клетку геометрического сета" },
+  stripeFill: { label: "Заполнение полос", min: 0.1, max: 0.9, step: 0.01, hint: "Доля полосы в её шаге" },
+  inset: { label: "Зазор модулей", min: 0, max: 0.4, step: 0.01, unit: "m", hint: "Просвет между фигурами геометрической буквы" },
+}
+
+export const materialParams: Partial<Record<MaterialNumKey, ParamDef>> = {
   auroraScale: { label: "Масштаб авроры", min: 0.03, max: 1.5, step: 0.01 },
   auroraSpeed: { label: "Скорость авроры", min: 0, max: 2, step: 0.01 },
   depth: { label: "Глубина градиента", min: 0.05, max: 2, step: 0.01, unit: "m" },
-  overlap: { label: "Полутень", min: 0, max: 1, step: 0.01, hint: "Цвет зоны наложения букв" },
+  overlap: { label: "Полутень", min: 0, max: 1, step: 0.01, hint: "Цвет зоны наложения букв внутри сплава" },
   glow: { label: "Корона", min: 0, max: 2, step: 0.01 },
   glowSize: { label: "Размер короны", min: 0.1, max: 5, step: 0.01, unit: "m" },
   shadow: { label: "Тень", min: 0, max: 1, step: 0.01 },
@@ -69,39 +84,158 @@ export const materialParams: Partial<Record<MaterialNumKey, ParamDef>> = {
   grain: { label: "Зерно", min: 0, max: 1, step: 0.01 },
 }
 
+export const shapeParams: Record<ShapeNumKey, ParamDef> = {
+  w: { label: "Ширина", min: 0.1, max: 40, step: 0.05, unit: "m" },
+  h: { label: "Высота", min: 0.05, max: 40, step: 0.05, unit: "m" },
+  r: { label: "Скругление", min: 0, max: 10, step: 0.05, unit: "m" },
+  sides: { label: "Стороны", min: 3, max: 16, step: 1 },
+  inner: { label: "Глубина лучей", min: 0.1, max: 1, step: 0.01 },
+  sweep: { label: "Сектор", min: 1, max: 360, step: 1, unit: "°" },
+  hole: { label: "Отверстие", min: 0, max: 0.95, step: 0.01 },
+}
+
+export type ClonerNumKey = NumKeys<Cloner>
+export type EffectorNumKey = NumKeys<Effector>
+
+export const clonerParams: Record<ClonerNumKey, ParamDef> = {
+  cols: { label: "Колонки", min: 1, max: 64, step: 1 },
+  rows: { label: "Ряды", min: 1, max: 64, step: 1 },
+  dx: { label: "Шаг X", min: -20, max: 20, step: 0.05, unit: "m" },
+  dy: { label: "Шаг Y", min: -20, max: 20, step: 0.05, unit: "m" },
+  count: { label: "Количество", min: 1, max: 256, step: 1 },
+  radius: { label: "Радиус", min: 0, max: 40, step: 0.05, unit: "m" },
+  rings: { label: "Кольца", min: 1, max: 16, step: 1 },
+  ringStep: { label: "Шаг колец", min: 0.5, max: 20, step: 0.05, unit: "m" },
+  stepRotation: { label: "Поворот за шаг", min: -180, max: 180, step: 0.5, unit: "°", mode: "offset" },
+  stepScale: { label: "Масштаб за шаг", min: 0.8, max: 1.25, step: 0.005 },
+  width: { label: "Ширина области", min: 1, max: 120, step: 0.5, unit: "m" },
+  height: { label: "Высота области", min: 1, max: 120, step: 0.5, unit: "m" },
+  seed: { label: "Зерно случая", min: 1, max: 999, step: 1 },
+}
+
+export const effectorParams: Record<EffectorNumKey, ParamDef> = {
+  amount: { label: "Сила", min: 0, max: 1, step: 0.01 },
+  position: { label: "Сдвиг", min: 0, max: 2, step: 0.01, hint: "В шагах раскладки" },
+  rotation: { label: "Поворот", min: 0, max: 1, step: 0.01, hint: "1 — до 180°" },
+  scale: { label: "Масштаб", min: -1, max: 1, step: 0.01 },
+  opacity: { label: "Исчезание", min: 0, max: 1, step: 0.01 },
+  color: { label: "Перекраска", min: 0, max: 1, step: 0.01 },
+  freq: { label: "Частота", min: 0.01, max: 1, step: 0.005 },
+  speed: { label: "Скорость", min: 0, max: 3, step: 0.01 },
+  radius: { label: "Радиус поля", min: 0.5, max: 40, step: 0.1, unit: "m" },
+  seed: { label: "Зерно случая", min: 1, max: 999, step: 1 },
+}
+
+export type PhysicsNumKey = NumKeys<Physics>
+export const physicsParams: Record<PhysicsNumKey, ParamDef> = {
+  gravity: { label: "Гравитация", min: 0, max: 4, step: 0.01, hint: "1 — как на Земле" },
+  gravityAngle: { label: "Направление", min: -180, max: 180, step: 1, unit: "°", mode: "offset", hint: "−90° — вниз" },
+  bounce: { label: "Упругость", min: 0, max: 1, step: 0.01 },
+  friction: { label: "Трение", min: 0, max: 1, step: 0.01 },
+  air: { label: "Сопротивление воздуха", min: 0, max: 0.2, step: 0.001 },
+  pointerForce: { label: "Сила курсора", min: 0, max: 4, step: 0.01 },
+  pointerRadius: { label: "Радиус курсора", min: 0.5, max: 30, step: 0.1, unit: "m" },
+  fieldForce: { label: "Сила поля", min: 0, max: 4, step: 0.01 },
+  maxBodies: { label: "Тел не больше", min: 10, max: 800, step: 10 },
+}
+
 export const sceneParams = {
   speed: { label: "Темп времени", min: 0, max: 3, step: 0.01 } as ParamDef,
   tracking: { label: "Трекинг", min: -3, max: 3, step: 0.05, unit: "m" } as ParamDef,
 }
 
-/** Resolves a modulation target path to its definition. */
+/* ---------- targets ---------- */
+
+export type Target =
+  | { scope: "axes" | "warp" | "material" | "look" | "scene" | "physics"; path: string[] }
+  | { scope: "node"; id: string; path: string[] }
+
+export function parseTarget(target: string): Target | null {
+  const m = target.match(/^layer:([^.]+)\.(.+)$/)
+  if (m) return { scope: "node", id: m[1], path: m[2].split(".") }
+  const [head, ...path] = target.split(".")
+  if (!path.length) return null
+  if (head === "axes" || head === "warp" || head === "material" || head === "look" || head === "scene" || head === "physics") return { scope: head, path }
+  return null
+}
+
+export const layerTarget = (id: string, key: string) => `layer:${id}.${key}`
+
+/** Definition of a target path. */
 export function paramDef(target: string): ParamDef | undefined {
-  const [head, key] = target.split(".")
-  if (head === "axes") return axisParams[key as AxisKey]
-  if (head === "warp") return warpParams[key as WarpKey]
-  if (head === "material") return materialParams[key as MaterialNumKey]
-  if (head === "scene") return sceneParams[key as keyof typeof sceneParams]
-  if (head.startsWith("layer:")) return layerParams[key as LayerNumKey]
+  const t = parseTarget(target)
+  if (!t) return undefined
+  const [a, b] = t.path
+  switch (t.scope) {
+    case "axes":
+      return axisParams[a as AxisKey]
+    case "warp":
+      return warpParams[a as WarpKey]
+    case "material":
+      return materialParams[a as MaterialNumKey]
+    case "look":
+      return lookParams[a as LookNumKey]
+    case "scene":
+      return sceneParams[a as keyof typeof sceneParams]
+    case "physics":
+      return a === "maxBodies" ? undefined : physicsParams[a as PhysicsNumKey]
+    case "node":
+      if (t.path.length === 1) return layerParams[a as LayerNumKey]
+      if (a === "look") return lookParams[b as LookNumKey]
+      if (a === "shape") return shapeParams[b as ShapeNumKey]
+      if (a === "axes") return axisParams[b as AxisKey]
+      if (a === "cloner") return b === "effectors" ? effectorParams[t.path[3] as EffectorNumKey] : clonerParams[b as ClonerNumKey]
+      return undefined
+  }
+}
+
+/** Reads a nested number; undefined when the path does not lead to one. */
+export function readPath(obj: unknown, path: string[]): number | undefined {
+  let v: unknown = obj
+  for (const k of path) {
+    if (!v || typeof v !== "object") return undefined
+    v = Array.isArray(v) ? v.find((e) => e?.id === k) : (v as Record<string, unknown>)[k]
+  }
+  return typeof v === "number" ? v : undefined
+}
+
+/**
+ * Returns a copy of `obj` with the number at `path` replaced (copies only
+ * along the path). Array elements are found by id; a missing one is left as is.
+ */
+export function writePath<T>(obj: T, path: string[], value: number): T {
+  if (!path.length) return obj
+  const [k, ...rest] = path
+  if (Array.isArray(obj)) {
+    if (!rest.length || !obj.some((e) => e?.id === k)) return obj
+    return obj.map((e) => (e?.id === k ? writePath(e, rest, value) : e)) as T
+  }
+  const src = (obj ?? {}) as Record<string, unknown>
+  return { ...src, [k]: rest.length ? writePath(src[k], rest, value) : value } as T
+}
+
+/** Value a node path falls back to when the node does not set it (looks and axes inherit). */
+function nodeFallback(scene: Pick<Scene, "look" | "axes">, path: string[]): number | undefined {
+  if (path[0] === "look") return readPath(scene.look, path.slice(1))
+  if (path[0] === "axes") return readPath(scene.axes, path.slice(1))
+  if (path[0] === "opacity") return 1
   return undefined
 }
 
-export const layerTarget = (id: string, key: LayerNumKey) => `layer:${id}.${key}`
-
-export type LayerNum = Pick<Layer, LayerNumKey>
-
 /** Reads the current value of a modulation target from a scene. */
-export function readParam(
-  scene: { axes: object; warp: object; material: object; layers: Layer[]; speed: number; tracking: number },
-  target: string,
-): number | undefined {
-  const [head, key] = target.split(".")
-  if (head === "axes") return (scene.axes as Record<string, number>)[key]
-  if (head === "warp") return (scene.warp as Record<string, number>)[key]
-  if (head === "material") return (scene.material as Record<string, number>)[key]
-  if (head === "scene") return key === "speed" ? scene.speed : scene.tracking
-  if (head.startsWith("layer:")) {
-    const l = scene.layers.find((x) => x.id === head.slice(6))
-    return l ? (l[key as LayerNumKey] as number) : undefined
+export function readParam(scene: Pick<Scene, "axes" | "warp" | "material" | "look" | "layers" | "speed" | "tracking" | "physics">, target: string): number | undefined {
+  const t = parseTarget(target)
+  if (!t) return undefined
+  if (t.scope === "node") {
+    const n = scene.layers.find((x) => x.id === t.id)
+    if (!n) return undefined
+    return readPath(n, t.path) ?? nodeFallback(scene, t.path)
   }
-  return undefined
+  if (t.scope === "scene") return t.path[0] === "speed" ? scene.speed : t.path[0] === "tracking" ? scene.tracking : undefined
+  return readPath(scene[t.scope], t.path)
+}
+
+/** Base value of a node path, including inherited ones. */
+export function readNodeParam(scene: Pick<Scene, "look" | "axes">, n: Layer, path: string[]) {
+  return readPath(n, path) ?? nodeFallback(scene, path)
 }

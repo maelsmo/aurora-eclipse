@@ -3,9 +3,9 @@
 import { GlyphRenderer, type View } from "./renderer"
 import { rasterize } from "../cpu"
 import { fitView, sceneFrame } from "../view"
-import { frameBounds } from "../frame"
-import type { Scene } from "../scene"
-import type { Alphabet } from "../types"
+import { frameBounds, type Frame } from "../frame"
+import type { Scene } from "../scene/types"
+import type { Library } from "../alphabet/sets"
 
 let shared: GlyphRenderer | null | undefined
 
@@ -29,20 +29,21 @@ export type ThumbOptions = {
   tight?: boolean
   /** Keep a constant vertical scale: this many modules fit the height. */
   fitHeight?: number
+  /** A frame built elsewhere (the live view with physics) instead of the scene's own. */
+  frame?: Frame
 }
 
 /** Draws the scene into a 2D canvas of the given device size. */
 export function drawScene(
   target: HTMLCanvasElement,
   scene: Scene,
-  alphabet: Alphabet,
-  revision: number,
+  lib: Library,
   opts: ThumbOptions = {},
 ) {
   const w = target.width,
     h = target.height
   if (!w || !h) return
-  const frame = sceneFrame(scene, alphabet, revision, opts.time ?? 0)
+  const frame = opts.frame ?? sceneFrame(scene, lib, opts.time ?? 0)
   let view = opts.view
   if (!view && opts.fitHeight) {
     const b = frameBounds(frame, 0.3)
@@ -66,18 +67,18 @@ export function drawScene(
 /** Renders at an arbitrary size and returns a PNG blob. */
 export async function renderPNG(
   scene: Scene,
-  alphabet: Alphabet,
-  revision: number,
+  lib: Library,
   width: number,
   height: number,
   view: View,
   time: number,
   transparent: boolean,
+  frame?: Frame,
 ): Promise<Blob> {
   const c = document.createElement("canvas")
   c.width = width
   c.height = height
-  drawScene(c, scene, alphabet, revision, { view, time, transparent })
+  drawScene(c, scene, lib, { view, time, transparent, frame })
   return new Promise((resolve, reject) =>
     c.toBlob((b) => (b ? resolve(b) : reject(new Error("PNG"))), "image/png"),
   )

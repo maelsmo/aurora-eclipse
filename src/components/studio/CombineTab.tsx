@@ -1,14 +1,19 @@
 import { ParamSlider } from "@/components/shared/ParamSlider"
 import { Section, Hint } from "@/components/shared/Section"
 import { opIcons } from "@/components/shared/icons"
-import { opInfo, ops } from "@/engine/operators"
+import { opInfo, ops, type Op } from "@/engine/operators"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useShallow } from "zustand/react/shallow"
 import { layerParams, layerTarget } from "@/engine/params"
 import { selectedLayer, useStore } from "@/state/store"
+import { mergeParent } from "@/engine/scene"
+import { nodeLabel } from "@/components/shared/labels"
 import { cn } from "@/lib/utils"
 
 export function CombineTab() {
   const layer = useStore(selectedLayer)
-  const isBase = useStore((s) => s.scene.layers[0]?.id === s.selected)
+  const host = useStore((s) => (layer ? mergeParent(s.scene.layers, layer.id) : null))
+  const isBase = useStore((s) => !!host && s.scene.layers.find((l) => l.parent === host.id)?.id === layer?.id)
   const updateLayer = useStore((s) => s.updateLayer)
 
   if (!layer)
@@ -20,16 +25,26 @@ export function CombineTab() {
         </Hint>
       </Section>
     )
+  if (layer?.type === "group" && layer.mode === "merge") return <MergeOverview id={layer.id} />
+  if (!host)
+    return (
+      <Section title={nodeLabel(layer)}>
+        <Hint>
+          Операторы действуют внутри сплава. Выделите буквы и объедините их в сплав в панели слоёв — тогда они начнут
+          сливаться, затмевать и вырезать друг друга.
+        </Hint>
+      </Section>
+    )
   if (isBase)
     return (
-      <Section title={`Слой ${layer.char}`}>
+      <Section title={nodeLabel(layer)}>
         <Hint>Нижний слой — основа сочетания. Оператор задаётся у слоёв над ним.</Hint>
       </Section>
     )
 
   return (
     <>
-      <Section title={`Слой ${layer.char}: оператор`}>
+      <Section title={`${nodeLabel(layer)}: оператор`}>
         <div role="radiogroup" aria-label="Оператор сочетания" className="grid grid-cols-2 gap-1.5">
           {ops.map((o) => {
             const I = opIcons[o]
@@ -68,5 +83,55 @@ export function CombineTab() {
         </Section>
       )}
     </>
+  )
+}
+
+/** A merge group selected: every member with its operator, bottom-up. */
+function MergeOverview({ id }: { id: string }) {
+  const members = useStore(useShallow((s) => s.scene.layers.filter((l) => l.parent === id)))
+  const updateLayer = useStore((s) => s.updateLayer)
+  const select = useStore((s) => s.select)
+  if (!members.length)
+    return (
+      <Section title="Сплав пуст">
+        <Hint>Перетащите в сплав буквы или фигуры в панели слоёв. Нижняя станет основой, остальные сочетаются с ней операторами.</Hint>
+      </Section>
+    )
+  return (
+    <Section title={`Операторы сплава · ${members.length}`}>
+      <Hint>Каждый объект сочетается со всем, что под ним. Нажмите на имя, чтобы настроить параметры оператора.</Hint>
+      <ul className="flex flex-col gap-1.5">
+        {[...members].reverse().map((m, i, arr) => {
+          const base = i === arr.length - 1
+          return (
+            <li key={m.id} className="flex items-center gap-2">
+              <button type="button" className="min-w-0 flex-1 truncate text-left text-sm hover:underline" onClick={() => select(m.id)}>
+                {nodeLabel(m)}
+              </button>
+              {base ? (
+                <span className="text-xs text-muted-foreground">Основа</span>
+              ) : (
+                <Select items={ops.map((o) => ({ value: o, label: opInfo[o].name }))} value={m.op} onValueChange={(v) => v && updateLayer(m.id, { op: v as Op })}>
+                  <SelectTrigger size="sm" className="w-40" aria-label={"Оператор " + nodeLabel(m)}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ops.map((o) => {
+                      const I = opIcons[o]
+                      return (
+                        <SelectItem key={o} value={o}>
+                          <I />
+                          {opInfo[o].name}
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </Section>
   )
 }

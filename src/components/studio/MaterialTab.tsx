@@ -3,17 +3,19 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ParamSlider } from "@/components/shared/ParamSlider"
 import { ColorInput } from "@/components/shared/ColorInput"
-import { Section } from "@/components/shared/Section"
+import { Section, Hint } from "@/components/shared/Section"
 import { SceneThumb } from "@/components/shared/Thumbs"
 import { contexts, applyContext } from "@/engine/presets"
-import { materialParams, type MaterialNumKey } from "@/engine/params"
-import type { ColorMode, FillMode, Material } from "@/engine/scene"
+import { lookParams, materialParams, type LookNumKey, type MaterialNumKey } from "@/engine/params"
+import { isLeaf, type ColorMode, type Look, type LookMode, type Material } from "@/engine/scene"
+import { nodeLabel } from "@/components/shared/labels"
 import { useStore } from "@/state/store"
 import { cn } from "@/lib/utils"
 
-const fills: { value: FillMode; label: string }[] = [
+const fills: { value: LookMode; label: string }[] = [
   { value: "fill", label: "Заливка" },
   { value: "outline", label: "Контур" },
+  { value: "lines", label: "Линии" },
   { value: "isolines", label: "Изолинии" },
   { value: "halftone", label: "Полутон" },
 ]
@@ -22,9 +24,10 @@ const colorModes: { value: ColorMode; label: string }[] = [
   { value: "aurora", label: "Аврора" },
   { value: "depth", label: "Глубина" },
 ]
-const fillParams: Record<FillMode, MaterialNumKey[]> = {
+const fillParams: Record<LookMode, LookNumKey[]> = {
   fill: [],
   outline: ["line"],
+  lines: ["stripes", "stripeFill"],
   isolines: ["line", "spacing", "rings"],
   halftone: ["dot"],
 }
@@ -35,6 +38,11 @@ export function MaterialTab() {
   const { setScene, updateLayer } = useStore.getState()
   const setM = (patch: Partial<Material>, key?: string) =>
     setScene((s) => ({ ...s, material: { ...s.material, ...patch } }), key)
+  const look = scene.look
+  const setL = (patch: Partial<Look>, key?: string) => setScene((s) => ({ ...s, look: { ...s.look, ...patch } }), key)
+  const lookSlider = (k: LookNumKey) => (
+    <ParamSlider key={k} def={lookParams[k]} value={look[k]} target={"look." + k} onChange={(v) => setL({ [k]: v }, "look." + k)} />
+  )
   const slider = (k: MaterialNumKey) => (
     <ParamSlider key={k} def={materialParams[k]!} value={m[k]} target={"material." + k} onChange={(v) => setM({ [k]: v }, "material." + k)} />
   )
@@ -62,80 +70,32 @@ export function MaterialTab() {
         </div>
       </Section>
 
-      <Section title="Отрисовка">
-        <ToggleGroup
-          variant="outline"
-          size="sm"
-          spacing={0}
-          value={[m.fill]}
-          onValueChange={(v) => v[0] && setM({ fill: v[0] as FillMode })}
-          className="w-full"
-          aria-label="Способ отрисовки"
-        >
-          {fills.map((f) => (
-            <ToggleGroupItem key={f.value} value={f.value} className="flex-1">
-              {f.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        {fillParams[m.fill].map(slider)}
-      </Section>
-
-      <Section title="Цвет">
-        <ToggleGroup
-          variant="outline"
-          size="sm"
-          spacing={0}
-          value={[m.colorMode]}
-          onValueChange={(v) => v[0] && setM({ colorMode: v[0] as ColorMode })}
-          className="w-full"
-          aria-label="Источник цвета"
-        >
-          {colorModes.map((f) => (
-            <ToggleGroupItem key={f.value} value={f.value} className="flex-1">
-              {f.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        {m.colorMode === "layer" && (
-          <div className="flex flex-wrap gap-1.5">
-            {scene.layers.map((l) => (
-              <div key={l.id} className="flex items-center gap-1 rounded-lg border py-0.5 pr-0.5 pl-2 text-xs">
-                {l.char}
-                <ColorInput value={l.color} label={"Цвет слоя " + l.char} className="h-7 w-7 border-0" onChange={(c) => updateLayer(l.id, { color: c }, "color:" + l.id)} />
-              </div>
+      <Section title="Аврора и глубина">
+        <Hint>Палитры для объектов, у которых во вкладке «Вид» выбран цвет «Аврора» или «Глубина».</Hint>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm text-foreground/80">Аврора</span>
+          <div className="flex gap-1.5">
+            {m.aurora.map((c, i) => (
+              <ColorInput
+                key={i}
+                value={c}
+                label={"Цвет авроры " + (i + 1)}
+                onChange={(v) => {
+                  const aurora = [...m.aurora] as Material["aurora"]
+                  aurora[i] = v
+                  setM({ aurora }, "aurora" + i)
+                }}
+              />
             ))}
           </div>
-        )}
-        {m.colorMode === "aurora" && (
-          <>
-            <div className="flex gap-1.5">
-              {m.aurora.map((c, i) => (
-                <ColorInput
-                  key={i}
-                  value={c}
-                  label={"Цвет авроры " + (i + 1)}
-                  onChange={(v) => {
-                    const aurora = [...m.aurora] as Material["aurora"]
-                    aurora[i] = v
-                    setM({ aurora }, "aurora" + i)
-                  }}
-                />
-              ))}
-            </div>
-            {slider("auroraScale")}
-            {slider("auroraSpeed")}
-          </>
-        )}
-        {m.colorMode === "depth" && (
-          <>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-foreground/80">Цвет глубины</span>
-              <ColorInput value={m.depthColor} label="Цвет глубины" onChange={(v) => setM({ depthColor: v }, "depthColor")} />
-            </div>
-            {slider("depth")}
-          </>
-        )}
+        </div>
+        {slider("auroraScale")}
+        {slider("auroraSpeed")}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-foreground/80">Цвет глубины</span>
+          <ColorInput value={m.depthColor} label="Цвет глубины" onChange={(v) => setM({ depthColor: v }, "depthColor")} />
+        </div>
+        {slider("depth")}
       </Section>
 
       <Section title="Полутень" action={<ColorInput value={m.overlapColor} label="Цвет полутени" onChange={(v) => setM({ overlapColor: v }, "overlapColor")} />}>

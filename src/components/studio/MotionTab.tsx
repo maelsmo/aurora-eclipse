@@ -9,6 +9,7 @@ import { lfoShapes, signalInfo } from "@/engine/signals"
 import { paramDef, sceneParams, warpParams, type WarpKey } from "@/engine/params"
 import type { Lfo, Motion, Scene } from "@/engine/scene"
 import { selectedLayer, useStore } from "@/state/store"
+import { effectorNames, nodeLabel } from "@/components/shared/labels"
 
 const motionItems = (Object.keys(motionNames) as Motion["type"][]).map((v) => ({ value: v, label: motionNames[v] }))
 const shapeItems = (Object.keys(lfoShapes) as Lfo["shape"][]).map((v) => ({ value: v, label: lfoShapes[v] }))
@@ -26,28 +27,36 @@ function targetLabel(scene: Scene, target: string) {
   if (target.startsWith("layer:")) {
     const id = target.slice(6).split(".")[0]
     const l = scene.layers.find((x) => x.id === id)
-    return `${l ? "Слой " + l.char : "Удалённый слой"} · ${def?.label ?? ""}`
+    const fx = target.match(/\.cloner\.effectors\.([^.]+)\./)
+    if (fx && l?.type === "group") {
+      const e = l.cloner?.effectors.find((x) => x.id === fx[1])
+      return `${nodeLabel(l)} · ${e ? effectorNames[e.kind] : "эффектор"} · ${def?.label ?? ""}`
+    }
+    return `${nodeLabel(l)} · ${def?.label ?? ""}`
   }
   return def?.label ?? target
 }
 
-export function MotionTab() {
+/** «Движение»: scene time, rhythms, warps and routes; or the selected object's motion. */
+export function MotionTab({ scope }: { scope: "scene" | "object" }) {
   const scene = useStore((s) => s.scene)
   const layer = useStore(selectedLayer)
   const { setScene, updateLayer } = useStore.getState()
 
   const setMotion = (patch: Partial<Motion>, key?: string) =>
     layer && updateLayer(layer.id, { motion: { ...layer.motion, ...patch } }, key)
-  const setLfo = (i: 0 | 1, patch: Partial<Lfo>, key?: string) =>
+  const setLfo = (i: 0 | 1 | 2 | 3, patch: Partial<Lfo>, key?: string) =>
     setScene((s) => {
       const lfo = [...s.lfo] as Scene["lfo"]
       lfo[i] = { ...lfo[i], ...patch }
       return { ...s, lfo }
     }, key)
-  const others = layer ? scene.layers.filter((l) => l.id !== layer.id) : []
+  // Orbit centres are siblings: positions share one coordinate space.
+  const others = layer ? scene.layers.filter((l) => l.id !== layer.id && l.parent === layer.parent) : []
 
   return (
     <>
+      {scope === "scene" && (
       <Section title="Время">
         <ParamSlider
           def={sceneParams.speed}
@@ -56,7 +65,9 @@ export function MotionTab() {
         />
       </Section>
 
-      <Section title={layer ? `Движение слоя ${layer.char}` : "Движение слоя"}>
+      )}
+      {scope === "object" && (
+      <Section title={layer ? `Движение: ${nodeLabel(layer)}` : "Движение слоя"}>
         {layer ? (
           <>
             <Select items={motionItems} value={layer.motion.type} onValueChange={(v) => v && setMotion({ type: v as Motion["type"] })}>
@@ -73,7 +84,7 @@ export function MotionTab() {
             </Select>
             {layer.motion.type === "orbit" && others.length > 0 && (
               <Select
-                items={[{ value: "", label: "Слой ниже" }, ...others.map((o) => ({ value: o.id, label: "Вокруг " + o.char }))]}
+                items={[{ value: "", label: "Слой ниже" }, ...others.map((o) => ({ value: o.id, label: "Вокруг " + nodeLabel(o) }))]}
                 value={layer.motion.target ?? ""}
                 onValueChange={(v) => setMotion({ target: v || undefined })}
               >
@@ -84,7 +95,7 @@ export function MotionTab() {
                   <SelectItem value="">Слой ниже</SelectItem>
                   {others.map((o) => (
                     <SelectItem key={o.id} value={o.id}>
-                      Вокруг {o.char}
+                      Вокруг {nodeLabel(o)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -109,8 +120,11 @@ export function MotionTab() {
         )}
       </Section>
 
+      )}
+      {scope === "scene" && (
+      <>
       <Section title="Ритмы">
-        {([0, 1] as const).map((i) => (
+        {([0, 1, 2, 3] as const).map((i) => (
           <div key={i} className="flex flex-col gap-3 rounded-lg border p-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium">Ритм {i + 1}</span>
@@ -144,14 +158,16 @@ export function MotionTab() {
         ))}
       </Section>
 
-      <Section title={`Связи с сигналами · ${scene.routes.length}`}>
+      </>
+      )}
+      <Section title={`Связи с сигналами · ${scope === "object" && layer ? scene.routes.filter((r) => r.target.startsWith("layer:" + layer.id + ".")).length : scene.routes.length}`}>
         {scene.routes.length === 0 ? (
           <Hint>
             Нажмите на значок волны рядом с любым параметром, чтобы привязать его ко времени, курсору или микрофону.
           </Hint>
         ) : (
           <ul className="flex flex-col gap-2">
-            {scene.routes.map((r) => (
+            {scene.routes.filter((r) => scope === "scene" || (layer && r.target.startsWith("layer:" + layer.id + "."))).map((r) => (
               <li key={r.id} className="flex flex-col gap-2 rounded-lg border p-2.5">
                 <div className="flex items-center gap-2">
                   <span className="min-w-0 flex-1 truncate text-sm">

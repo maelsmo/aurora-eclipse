@@ -1,6 +1,9 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { drawScene, type ThumbOptions } from "@/engine/gpu/thumbs"
-import { makeLayer, makeScene, type Scene } from "@/engine/scene"
+import { fitView } from "@/engine/view"
+import type { Frame } from "@/engine/frame"
+import type { Box } from "@/engine/types"
+import { defaultLook, makeLayer, makeScene, type LookPatch, type Scene } from "@/engine/scene"
 import type { Axes } from "@/engine/axes"
 import { useStore } from "@/state/store"
 import { cn } from "@/lib/utils"
@@ -31,41 +34,68 @@ export function SceneThumb({
   className,
   options,
   label,
+  frame,
+  box,
 }: {
   scene: Scene
   className?: string
   options?: ThumbOptions
   label?: string
+  /** A prebuilt frame (the live view with physics) instead of the scene's own. */
+  frame?: Frame
+  /** World box that fills the canvas exactly (the export frame). */
+  box?: Box
 }) {
-  const alphabet = useStore((s) => s.alphabet)
-  const revision = useStore((s) => s.revision)
+  const library = useStore((s) => s.library)
   const ref = useCanvasDraw(
-    (c) => drawScene(c, scene, alphabet, revision, options),
-    [scene, alphabet, revision, JSON.stringify(options ?? {})],
+    (c) => drawScene(c, scene, library, { ...options, frame, view: box ? fitView(box, c.width, c.height, 0) : options?.view }),
+    [scene, library, JSON.stringify(options ?? {}), frame, box && JSON.stringify(box)],
   )
   return <canvas ref={ref} role="img" aria-label={label} className={cn("block size-full", className)} />
 }
 
 const glyphScenes = new Map<string, Scene>()
 
+/** Ink of glyphs drawn without a colour of their own: the theme's text colour. */
+export function useThemeInk() {
+  const read = () => (typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#EDEDED" : "#161616")
+  const [ink, setInk] = useState(read)
+  useEffect(() => {
+    const mo = new MutationObserver(() => setInk(read()))
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+    return () => mo.disconnect()
+  }, [])
+  return ink
+}
+
 export function GlyphThumb({
   char,
   axes,
-  color = "#161616",
+  set,
+  look,
+  color: own,
   className,
 }: {
   char: string
   axes?: Axes
+  /** Glyph set; defaults to the scene set. */
+  set?: string
+  look?: LookPatch
   color?: string
   className?: string
 }) {
+  const ink = useThemeInk()
+  const color = own ?? ink
   const globalAxes = useStore((s) => s.scene.axes)
+  const sceneSet = useStore((s) => s.scene.set)
   const ax = axes ?? globalAxes
-  const key = char + color + JSON.stringify(ax)
+  const key = char + color + (set ?? sceneSet) + JSON.stringify(ax) + JSON.stringify(look ?? {})
   let scene = glyphScenes.get(key)
   if (!scene) {
     scene = makeScene({
       axes: ax,
+      set: set ?? sceneSet,
+      look: { ...defaultLook, ...look },
       layers: [makeLayer(char, { color })],
       material: { ...makeScene().material, transparent: true },
     })

@@ -1,7 +1,8 @@
 // CPU rasteriser on the reference field: fallback without WebGL2 and the
-// ground truth for the GPU parity check. Fill and outline only.
-import { hexToRgb, sampleFrame, type Frame } from "./frame"
-import type { Material } from "./scene"
+// ground truth for the GPU parity check. Items are composited in z-order;
+// fill and outline only.
+import { hexToRgb, sampleItem, type Frame } from "./frame"
+import type { Material } from "./scene/types"
 import type { View } from "./gpu/renderer"
 
 export function rasterize(
@@ -23,23 +24,37 @@ export function rasterize(
     const wy = view.cy + (height - j - 0.5 - height / 2) * px
     for (let i = 0; i < width; i++) {
       const wx = view.cx + (i + 0.5 - width / 2) * px
-      const s = sampleFrame(frame, wx, wy, px)
-      const d = material.fill === "outline" ? Math.abs(s.d) - material.line / 2 : s.d
-      const a = Math.max(0, Math.min(1, 0.5 - d / px))
-      let [r, g, b] = s.color
-      if (material.overlap > 0) {
-        const t = s.overlap * material.overlap
-        r += (ov[0] - r) * t
-        g += (ov[1] - g) * t
-        b += (ov[2] - b) * t
+      // Premultiplied over-composite of the items onto the background.
+      let r = bg[0] * bgA,
+        g = bg[1] * bgA,
+        b = bg[2] * bgA,
+        A = bgA
+      for (const it of frame.items) {
+        const s = sampleItem(frame, it, wx, wy, px)
+        const d = it.look.mode === "outline" ? Math.abs(s.d) - it.look.line / 2 : s.d
+        let a = Math.max(0, Math.min(1, 0.5 - d / px))
+        // A mask clips what the look draws (min of coverages, as on the GPU).
+        if (s.mask !== undefined) a = Math.min(a, Math.max(0, Math.min(1, 0.5 - s.mask / px)))
+        a *= it.opacity
+        if (a <= 0) continue
+        let [cr, cg, cb] = s.color
+        if (material.overlap > 0) {
+          const t = s.overlap * material.overlap
+          cr += (ov[0] - cr) * t
+          cg += (ov[1] - cg) * t
+          cb += (ov[2] - cb) * t
+        }
+        r = cr * a + r * (1 - a)
+        g = cg * a + g * (1 - a)
+        b = cb * a + b * (1 - a)
+        A = a + A * (1 - a)
       }
-      const outA = a + bgA * (1 - a)
+      if (A <= 0) continue
       const k = (j * width + i) * 4
-      if (outA <= 0) continue
-      img.data[k] = ((r * a + bg[0] * bgA * (1 - a)) / outA) * 255
-      img.data[k + 1] = ((g * a + bg[1] * bgA * (1 - a)) / outA) * 255
-      img.data[k + 2] = ((b * a + bg[2] * bgA * (1 - a)) / outA) * 255
-      img.data[k + 3] = outA * 255
+      img.data[k] = (r / A) * 255
+      img.data[k + 1] = (g / A) * 255
+      img.data[k + 2] = (b / A) * 255
+      img.data[k + 3] = A * 255
     }
   }
   ctx.putImageData(img, 0, 0)

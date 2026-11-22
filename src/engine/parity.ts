@@ -1,29 +1,33 @@
-// Dev check: the GPU interpreter must draw the same shapes as the CPU reference.
+// Dev check: the GPU renderer must draw the same shapes as the CPU reference.
 import { GlyphRenderer } from "./gpu/renderer"
 import { rasterize } from "./cpu"
 import { frameBounds } from "./frame"
 import { fitView, sceneFrame } from "./view"
 import { presets } from "./presets"
-import { defaultMaterial, type Scene } from "./scene"
-import type { Alphabet } from "./types"
+import { defaultLook, defaultMaterial, type Scene } from "./scene"
+import type { Library } from "./alphabet/sets"
 
 export type ParityResult = { name: string; edge: number; flipped: number; maxDelta: number }
 
-export function parityCheck(name: string, scene: Scene, alphabet: Alphabet, revision: number, w = 480, h = 300): ParityResult {
-  const s: Scene = { ...scene, material: { ...defaultMaterial, transparent: true }, warp: { ...scene.warp, flow: 0, wave: 0, pointer: 0 } }
-  const frame = sceneFrame(s, alphabet, revision, 0)
+function pixels(canvas: HTMLCanvasElement, w: number, h: number) {
+  const c = document.createElement("canvas")
+  c.width = w
+  c.height = h
+  const ctx = c.getContext("2d")!
+  ctx.drawImage(canvas, 0, 0)
+  return ctx.getImageData(0, 0, w, h).data
+}
+
+export function parityCheck(name: string, scene: Scene, lib: Library, w = 480, h = 300): ParityResult {
+  const s: Scene = { ...scene, look: { ...defaultLook }, material: { ...defaultMaterial, transparent: true }, warp: { ...scene.warp, flow: 0, wave: 0, pointer: 0 } }
+  const frame = sceneFrame(s, lib, 0)
   const view = fitView(frameBounds(frame, 0.6), w, h, 0.05)
   const glCanvas = document.createElement("canvas")
   const r = new GlyphRenderer(glCanvas, { preserve: true })
   r.resize(w, h)
   r.render(frame, s.material, view)
-  const a = document.createElement("canvas")
-  a.width = w
-  a.height = h
-  const actx = a.getContext("2d")!
-  actx.drawImage(glCanvas, 0, 0)
+  const gpu = pixels(glCanvas, w, h)
   r.dispose()
-  const gpu = actx.getImageData(0, 0, w, h).data
   const b = document.createElement("canvas")
   b.width = w
   b.height = h
@@ -44,6 +48,6 @@ export function parityCheck(name: string, scene: Scene, alphabet: Alphabet, revi
   return { name, edge, flipped, maxDelta: +maxDelta.toFixed(3) }
 }
 
-export function parityAll(alphabet: Alphabet, revision: number) {
-  return presets.map((p) => parityCheck(p.name, p.make(), alphabet, revision))
+export function parityAll(lib: Library) {
+  return presets.map((p) => parityCheck(p.name, p.make(), lib))
 }

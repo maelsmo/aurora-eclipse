@@ -4,7 +4,7 @@ import { compilePrims, compileGlyph, glyphPrims, junctionEnds } from "../compile
 import { defaultAxes } from "../axes"
 import { defaultAlphabet, charset } from "../alphabet"
 import { combine, ops } from "../operators"
-import type { CompiledGlyph } from "../types"
+import { primPoints, type CompiledGlyph } from "../types"
 
 const DEG = Math.PI / 180
 
@@ -130,7 +130,7 @@ describe("alphabet", () => {
   it("every node lies on the 0.25 grid and inside the metric zone", () => {
     for (const c of charset) {
       for (const p of glyphPrims(c, defaultAlphabet)!) {
-        const pts = "c" in p ? [p.c] : [p.a, p.b]
+        const pts = primPoints(p)
         for (const [x, y] of pts) {
           expect(Math.abs(x * 4 - Math.round(x * 4))).toBeLessThan(1e-9)
           expect(Math.abs(y * 4 - Math.round(y * 4))).toBeLessThan(1e-9)
