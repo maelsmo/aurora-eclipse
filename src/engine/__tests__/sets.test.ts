@@ -127,3 +127,34 @@ describe("geometric set", () => {
     expect(resolveGlyphSet(lib, "@", undefined, "main")).toBeNull()
   })
 })
+
+describe("stored sets keep every field", () => {
+  it("anchor, advance, base and look survive a save round trip", async () => {
+    const { sanitizeSet } = await import("../../state/persist")
+    const tile = geoTiles["◜"]
+    const set = {
+      id: "s1",
+      name: "Плитки",
+      kind: "shapes" as const,
+      base: "geo" as const,
+      glyphs: { "◜": { ...tile, prims: [...tile.prims] }, Ё: { base: "E", prims: [] }, A: { adv: 7.5, prims: geoAlphabet.A.prims } },
+      look: { mode: "lines" as const, stripes: 1.6 },
+      updated: 1,
+    }
+    const back = sanitizeSet(JSON.parse(JSON.stringify(set)))!
+    expect(back.glyphs["◜"].anchor).toEqual([1.25, 1.25])
+    expect(back.glyphs["Ё"].base).toBe("E")
+    expect(back.glyphs.A.adv).toBe(7.5)
+    expect(back.glyphs.A.prims).toHaveLength(geoAlphabet.A.prims.length)
+    expect(back.look).toEqual({ mode: "lines", stripes: 1.6 })
+    expect(back).toEqual(set)
+  })
+
+  it("drops broken anchors and unknown modules", async () => {
+    const { sanitizeGlyphs } = await import("../../state/persist")
+    const g = sanitizeGlyphs({ X: { anchor: [1, "a"], prims: [{ kind: "box", a: [0, 0], b: [1, 1] }, { kind: "laser" }] }, toolong: { prims: [] } })
+    expect(Object.keys(g)).toEqual(["X"])
+    expect(g.X.anchor).toBeUndefined()
+    expect(g.X.prims).toHaveLength(1)
+  })
+})

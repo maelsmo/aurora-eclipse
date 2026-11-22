@@ -13,11 +13,12 @@ import { Section, Hint } from "@/components/shared/Section"
 import { SceneThumb, useThemeInk } from "@/components/shared/Thumbs"
 import { defaultAlphabet, sharedBy } from "@/engine/alphabet"
 import { glyphAdvance } from "@/engine/compile"
-import { layoutText, makeScene } from "@/engine/scene"
+import { layoutText, makeScene, sanitizeLookPatch } from "@/engine/scene"
 import { download } from "@/engine/storage"
 import type { GlyphDef, PrimDef } from "@/engine/types"
 import { primPoints } from "@/engine/types"
 import { editingAlphabet, useStore } from "@/state/store"
+import { sanitizeGlyphs } from "@/state/persist"
 import { editTarget, primNames, withPrims } from "./editing"
 import { GeoModuleControls, ModuleActions } from "./GeoModuleControls"
 import { NewSetMenu, SetLookSection } from "./SetControls"
@@ -28,23 +29,6 @@ const radiusDef = { label: "Радиус", min: 0.5, max: 4, step: 0.5, unit: "m
 const angleDef = (label: string) => ({ label, min: -360, max: 720, step: 15, unit: "°" })
 const advDef = { label: "Ширина знака", min: 1, max: 7, step: 0.5, unit: "m" }
 
-function validGlyphs(raw: unknown): Record<string, GlyphDef> | null {
-  if (!raw || typeof raw !== "object") return null
-  const out: Record<string, GlyphDef> = {}
-  for (const [c, g] of Object.entries(raw as Record<string, unknown>)) {
-    if ([...c].length !== 1 || !g || typeof g !== "object") continue
-    const prims = (g as GlyphDef).prims
-    if (!Array.isArray(prims)) continue
-    const ok = prims.every(
-      (p: PrimDef) =>
-        p &&
-        ["stroke", "arc", "dot", "hole", "slot", "box", "ellipse", "sector", "poly"].includes(p.kind) &&
-        ("c" in p ? Array.isArray(p.c) : "pts" in p ? Array.isArray(p.pts) : Array.isArray(p.a) && Array.isArray(p.b)),
-    )
-    if (ok) out[c] = g as GlyphDef
-  }
-  return out
-}
 
 export function GlyphPanel({ selected, onSelect }: { selected: number | null; onSelect: (i: number | null) => void }) {
   const editing = useStore((s) => s.editing)
@@ -94,12 +78,15 @@ export function GlyphPanel({ selected, onSelect }: { selected: number | null; on
   async function importVersion(file: File) {
     try {
       const data = JSON.parse(await file.text())
-      const glyphs = validGlyphs(data?.glyphs)
-      if (!glyphs) throw new Error()
+      if (!data || typeof data !== "object" || !data.glyphs || typeof data.glyphs !== "object") throw new Error()
+      // The same checks as stored sets: modules, advance, base glyph, anchor; the set's look too.
+      const glyphs = sanitizeGlyphs(data.glyphs)
+      const look = sanitizeLookPatch(data.look)
       st.addSet(typeof data.name === "string" ? data.name.slice(0, 40) : file.name, {
         glyphs,
         base: data.base === "geo" || data.base === "empty" ? data.base : "default",
         kind: data.kind === "shapes" ? "shapes" : "strokes",
+        look,
       })
       toast.success(`Алфавит «${data.name ?? file.name}» загружен: ${Object.keys(glyphs).length} изменённых знаков`)
     } catch {

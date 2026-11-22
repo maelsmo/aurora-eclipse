@@ -67,7 +67,7 @@ type Actions = {
   glyphUndo: () => void
   glyphRedo: () => void
   setEditingSet: (id: string) => void
-  addSet: (name: string, opts?: { base?: SetBase; kind?: SetKind; from?: string; glyphs?: Record<string, GlyphDef> }) => string
+  addSet: (name: string, opts?: { base?: SetBase; kind?: SetKind; from?: string; glyphs?: Record<string, GlyphDef>; look?: LookPatch }) => string
   renameSet: (id: string, name: string) => void
   deleteSet: (id: string) => void
   setSetLook: (id: string, look: LookPatch | undefined) => void
@@ -215,7 +215,7 @@ export const useStore = create<State & Actions>()((set, get) => {
       const from = opts.from ? get().sets.find((s) => s.id === opts.from) : undefined
       const next: GlyphSet = from
         ? { ...from, id, name, glyphs: { ...from.glyphs }, updated: Date.now() }
-        : { id, name, kind: opts.kind ?? "strokes", base: opts.base ?? "default", glyphs: { ...opts.glyphs }, updated: Date.now() }
+        : { id, name, kind: opts.kind ?? "strokes", base: opts.base ?? "default", glyphs: { ...opts.glyphs }, ...(opts.look && Object.keys(opts.look).length ? { look: opts.look } : {}), updated: Date.now() }
       changeSets([...get().sets, next], { editingSet: id })
       return id
     },
