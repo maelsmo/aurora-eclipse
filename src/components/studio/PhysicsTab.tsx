@@ -8,10 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ParamSlider } from "@/components/shared/ParamSlider"
 import { Section, Hint } from "@/components/shared/Section"
 import { physicsParams, type PhysicsNumKey } from "@/engine/params"
-import { defaultPhysics, parentXf, worldXf, xfCompose, xfInvert, xfToFields, type Physics, type PhysicsField, type PhysicsPointer } from "@/engine/scene"
+import { defaultPhysics, type Physics, type PhysicsField, type PhysicsPointer } from "@/engine/scene"
 import { useStore } from "@/state/store"
 import { plural } from "@/components/shared/labels"
 import { runtime } from "@/state/runtime"
+import { bakeBodies } from "@/state/exporting"
 
 const pointerItems: { value: PhysicsPointer; label: string }[] = [
   { value: "none", label: "Нет" },
@@ -72,15 +73,9 @@ export function PhysicsTab() {
     if (!w) return
     let moved = 0
     setScene((s) => {
-      const layers = s.layers.map((n) => {
-        const d = w.delta(n.id)
-        if (!d || n.locked) return n
-        // New world placement = body motion ∘ old world placement, back in the parent's frame.
-        const local = xfCompose(xfInvert(parentXf(s.layers, n.id)), xfCompose(d, worldXf(s.layers, n.id)))
-        moved++
-        return { ...n, ...xfToFields(local) }
-      })
-      return { ...s, layers }
+      const baked = bakeBodies(s, w)
+      moved = baked.moved
+      return baked.scene
     })
     toast(moved ? `Положения ${moved} ${plural(moved, "объекта", "объектов", "объектов")} записаны в сцену.` : "Нечего записывать: клоны двигаются только в живом просмотре.")
   }

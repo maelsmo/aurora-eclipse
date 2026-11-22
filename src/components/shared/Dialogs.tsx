@@ -16,7 +16,7 @@ import { even, mp4Supported } from "@/engine/export/video"
 import { renderPNG } from "@/engine/gpu/thumbs"
 import type { Frame } from "@/engine/frame"
 import { fitView } from "@/engine/view"
-import { exportBox, exportDefaults, exportFrame, exportVideo, sizeFor } from "@/state/exporting"
+import { exportBox, exportDefaults, exportFrame, exportVideo, liveBodies, sizeFor } from "@/state/exporting"
 import { download } from "@/engine/storage"
 import type { Look, Scene } from "@/engine/scene"
 import { sceneChars } from "./labels"
@@ -95,6 +95,9 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const [fps, setFps] = useState("30")
   const [seconds, setSeconds] = useState("5")
   const [mp4, setMp4] = useState<boolean | null>(null)
+  // MP4 of a running simulation: start from what is on screen, not from the scene's own start.
+  const [canLive, setCanLive] = useState(false)
+  const [fromLive, setFromLive] = useState(true)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState(0)
   const [frozen, setFrozen] = useState<Frozen | null>(null)
@@ -109,6 +112,8 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     const d = exportDefaults(st.scene)
     setUseArtboard(d.useArtboard)
     setTransparent(d.transparent)
+    setCanLive(!!liveBodies(st.scene))
+    setFromLive(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
@@ -155,6 +160,7 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
           scene: useStore.getState().scene,
           lib: library,
           useArtboard,
+          fromLive: canLive && fromLive,
           long: Number(videoLong),
           fps: Number(fps),
           seconds: Number(seconds),
@@ -197,7 +203,9 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     png: "Растр текущего кадра со всеми эффектами материала.",
     video:
       videoKind === "mp4"
-        ? "MP4 (H.264) покадрово с начала сцены: ритмы, движение, клоны и физика просчитываются для каждого кадра, файл не теряет кадров на медленной машине."
+        ? canLive && fromLive
+          ? "MP4 (H.264) покадрово с момента на экране: тела стартуют с текущих мест из покоя, ритмы продолжаются. Клоны клонера начинают со своей раскладки."
+          : "MP4 (H.264) покадрово с начала сцены: ритмы, движение, клоны и физика просчитываются для каждого кадра, файл не теряет кадров на медленной машине."
         : "Запись холста студии в WebM в реальном времени, с курсором и микрофоном. Не переключайте вкладку во время записи.",
     json: "Рецепт: сцена, связи, движение и изменённые знаки алфавита. Подходит для переноса и будущего 3D.",
   }
@@ -212,10 +220,12 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
 
   return (
     <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-y-auto *:shrink-0 sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Экспорт</DialogTitle>
-          <DialogDescription>{format === "video" && videoKind === "mp4" ? "Видео считается заново с начала сцены." : "Кадр зафиксирован в момент открытия окна."}</DialogDescription>
+          <DialogDescription>
+            {format === "video" && videoKind === "mp4" ? (canLive && fromLive ? "Видео считается заново с момента на экране." : "Видео считается заново с начала сцены.") : "Кадр зафиксирован в момент открытия окна."}
+          </DialogDescription>
         </DialogHeader>
         <div
           className="mx-auto max-h-64 w-full overflow-hidden rounded-lg border"
@@ -320,6 +330,14 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
                     ))}
                   </ToggleGroup>
                 </div>
+                {canLive && (
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="exp-live" className="font-normal">
+                      С положений тел на экране
+                    </Label>
+                    <Switch id="exp-live" checked={fromLive} onCheckedChange={setFromLive} />
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm">Кадров в секунду</span>
                   <ToggleGroup variant="outline" size="sm" spacing={0} value={[fps]} onValueChange={(v) => v[0] && setFps(v[0])} aria-label="Кадров в секунду">

@@ -723,7 +723,7 @@ export function LayersPanel() {
   }
 
   return (
-    <aside className="relative flex min-h-0 w-full flex-col rounded-xl border bg-card lg:w-72 lg:shrink-0" aria-label="Слои">
+    <aside className="relative flex min-h-0 w-full flex-col rounded-xl border bg-card lg:w-56 lg:shrink-0 xl:w-72" aria-label="Слои">
       <div className="flex items-center justify-between gap-1 border-b px-3 py-2">
         <h2 className="text-sm font-medium">
           Слои <span className="text-muted-foreground tabular-nums">· {scene.layers.length}</span>
