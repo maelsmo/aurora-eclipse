@@ -1,7 +1,7 @@
 // Scene actions on the current selection, shared by the layer tree, its
 // context menu, the canvas and keyboard shortcuts.
 import { toast } from "sonner"
-import { childrenOf, deleteNodes, duplicateNodes, groupNodes, isDescendant, isGroup, isLeaf, LIMITS, moveNode, ungroup, type GroupMode, type Layer, type Scene, ancestors, defaultCloner } from "@/engine/scene"
+import { childrenOf, deleteNodes, duplicateNodes, groupNodes, isDescendant, isGroup, isLeaf, LIMITS, moveNode, ungroup, type GroupMode, type Layer, type Scene, ancestors, defaultCloner, addIssue, subtreeSize } from "@/engine/scene"
 import { selectedIds, useStore } from "@/state/store"
 import { runtime } from "@/state/runtime"
 import { layerBounds } from "@/engine/frame"
@@ -25,6 +25,10 @@ export function groupSelection(mode: GroupMode) {
     if (mode === "merge") toast("В сплав объединяются буквы и фигуры. Выделите хотя бы одну.")
     return
   }
+  if (mode === "merge" && ids.length > LIMITS.mergeChildren)
+    return void toast.error(`В сплаве не больше ${LIMITS.mergeChildren} объектов, выделено ${ids.length}. Разбейте их на несколько сплавов.`)
+  const issue = addIssue(s.scene.layers, undefined, 0, 1)
+  if (issue) return void toast.error(issue)
   const { scene, id } = groupNodes(s.scene, ids, mode)
   s.setScene(scene)
   if (id) s.select(id)
@@ -43,10 +47,16 @@ export function duplicateSelection() {
   const s = st()
   const ids = selectionRoots(s.scene, selectedIds(s))
   if (!ids.length) return
-  if (s.scene.layers.length + ids.length > LIMITS.nodes) {
-    toast.error(`В сцене не больше ${LIMITS.nodes} объектов.`)
-    return
+  // Copies count whole subtrees; copies of merge children stay in that merge.
+  const total = ids.reduce((n, id) => n + subtreeSize(s.scene.layers, id), 0)
+  const byParent = new Map<string | undefined, number>()
+  for (const id of ids) {
+    const p = s.scene.layers.find((l) => l.id === id)?.parent
+    byParent.set(p, (byParent.get(p) ?? 0) + 1)
   }
+  const issue =
+    addIssue(s.scene.layers, undefined, 0, total) ?? [...byParent].map(([p, n]) => addIssue(s.scene.layers, p, n, 0)).find((x) => x) ?? null
+  if (issue) return void toast.error(issue)
   const res = duplicateNodes(s.scene, ids)
   s.setScene(res.scene)
   s.selectMany(res.ids)
@@ -116,6 +126,9 @@ export function moveTo(dragged: string[], target: DropTarget) {
   // Merge groups take letters and shapes only.
   const ok = roots.filter((id) => !(isGroup(host) && host.mode === "merge" && !isLeaf(scene.layers.find((l) => l.id === id))))
   if (ok.length < roots.length) toast("Группы не входят в сплав: в нём только буквы и фигуры.")
+  const arriving = ok.filter((id) => scene.layers.find((l) => l.id === id)?.parent !== parent).length
+  const issue = addIssue(scene.layers, parent, arriving, 0)
+  if (issue) return void toast.error(issue)
   let next = scene
   // Keep the dragged nodes' z-order: the topmost one ends up highest.
   const ordered = [...ok].sort((a, b) => next.layers.findIndex((l) => l.id === a) - next.layers.findIndex((l) => l.id === b))
@@ -183,6 +196,8 @@ export function clonerFromSelection() {
   const cloner = tiles
     ? { ...defaultCloner, dx: Math.round(w * 4) / 4, dy: Math.round(h * 4) / 4 }
     : { ...defaultCloner, cols: 4, rows: 3, dx: Math.round((w + 0.5) * 4) / 4, dy: Math.round((h + 0.5) * 4) / 4 }
+  const issue = addIssue(s.scene.layers, undefined, 0, 1)
+  if (issue) return void toast.error(issue)
   const { scene, id } = groupNodes(s.scene, ids, "stack", { name: "Клонер", cloner })
   s.setScene(scene)
   if (id) s.select(id)
@@ -209,4 +224,22 @@ export function setCollapsedDeep(id: string | undefined, collapsed: boolean) {
   const layers = s.scene.layers
   const targets = layers.filter((l) => isGroup(l) && (id === undefined || l.id === id || isDescendant(layers, l, id)))
   if (targets.length) s.updateLayers(targets.map((g) => ({ id: g.id, patch: { collapsed: collapsed || undefined } })))
+}
+
+/**
+ * Moves freshly laid-out nodes (centred on the origin) to the centre of the
+ * studio view.
+ */
+export function placeInView<T extends Layer>(nodes: T[]): T[] {
+  const v = runtime.view
+  if (!v || !nodes.length) return nodes
+  return nodes.map((n) => ({ ...n, x: n.x + v.cx, y: n.y + v.cy }))
+}
+
+/** Fits the view to a world box when it is not entirely visible. */
+export function reveal(box: { x0: number; y0: number; x1: number; y1: number }) {
+  const v = runtime.view
+  if (!v) return
+  const inside = box.x0 >= v.cx - v.w / 2 && box.x1 <= v.cx + v.w / 2 && box.y0 >= v.cy - v.h / 2 && box.y1 <= v.cy + v.h / 2
+  if (!inside) runtime.focus(box)
 }

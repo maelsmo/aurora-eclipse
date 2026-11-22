@@ -17,7 +17,7 @@ import { Section, Hint } from "@/components/shared/Section"
 import { nodeLabel } from "@/components/shared/labels"
 import { axisKeys, defaultAxes, type AxisKey } from "@/engine/axes"
 import { axisParams, layerParams, layerTarget, type LayerNumKey } from "@/engine/params"
-import { isGroup, isLeaf, normalize, type Artboard } from "@/engine/scene"
+import { isGroup, isLeaf, LIMITS, normalize, type Artboard } from "@/engine/scene"
 import { selectedIds, useStore } from "@/state/store"
 import { ShapeControls } from "./ShapeControls"
 
@@ -109,6 +109,9 @@ export function ObjectTab() {
               value={[group.mode]}
               onValueChange={(v) => {
                 if (!v[0] || v[0] === group.mode) return
+                const leaves = scene.layers.filter((l) => l.parent === group.id && !isGroup(l)).length
+                if (v[0] === "merge" && leaves > LIMITS.mergeChildren)
+                  return void toast.error(`В сплаве не больше ${LIMITS.mergeChildren} объектов, в группе ${leaves}. Разбейте её на несколько сплавов.`)
                 const nested = scene.layers.some((l) => l.parent === group.id && isGroup(l))
                 setScene((s) => ({ ...s, layers: normalize(s.layers.map((l) => (l.id === group.id ? { ...group, mode: v[0] as "stack" | "merge" } : l))) }))
                 if (v[0] === "merge" && nested) toast("Вложенные группы вынесены из сплава: в сплаве только буквы и фигуры.")

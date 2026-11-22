@@ -264,6 +264,14 @@ export function StudioCanvas() {
       schedule.current()
     }
     fitRef.current = fit
+    runtime.focus = (box) => {
+      if (!el.clientWidth || !el.clientHeight) return
+      const v = fitView(box, el.clientWidth, el.clientHeight, 0.08)
+      zoom.current = Math.min(v.scale, 160)
+      center.current = [v.cx, v.cy]
+      setZoomLabel(Math.round((zoom.current / 40) * 100))
+      schedule.current()
+    }
 
     const draw = (now: number) => {
       raf = 0
@@ -285,6 +293,7 @@ export function StudioCanvas() {
       const W = Math.max(1, Math.round(cw * res)),
         H = Math.max(1, Math.round(ch * res))
       const view: View = { cx: center.current[0], cy: center.current[1], scale: zoom.current * res }
+      runtime.view = { cx: center.current[0], cy: center.current[1], w: cw / zoom.current, h: ch / zoom.current }
       if (renderer) {
         renderer.resize(W, H)
         renderer.render(frame, eff.material, view)

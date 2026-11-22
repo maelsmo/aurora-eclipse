@@ -61,10 +61,12 @@ import { opInfo, ops, type Op } from "@/engine/operators"
 import {
   ancestors,
   childrenOf,
-  groupNodes,
   inks,
   isGroup,
   layoutText,
+  chunkByWords,
+  groupText,
+  addIssue,
   CLONE_LIMITS,
   LIMITS,
   defaultCloner,
@@ -80,6 +82,7 @@ import {
 import { sceneParams } from "@/engine/params"
 import { cloneCount } from "@/engine/cloner"
 import { sceneAlphabet, selectedIds, useStore } from "@/state/store"
+import { runtime } from "@/state/runtime"
 import { cn } from "@/lib/utils"
 import {
   arrange,
@@ -89,6 +92,8 @@ import {
   groupSelection,
   moveTo,
   nodeRole,
+  placeInView,
+  reveal,
   selectChildren,
   setCollapsedDeep,
   soloVisibility,
@@ -162,15 +167,22 @@ function TextForm({ onDone }: { onDone: () => void }) {
     const color = scene.layers.find((l) => l.type === "letter")?.color ?? inks[0]
     const letters = layoutText(value, abc, scene.axes, scene.tracking, { op, color, ...(set !== scene.set ? { set } : {}) }, entry?.version ?? 0)
     if (!letters.length) return void toast.error("В сете нет этих знаков.")
-    if (scene.layers.length + letters.length + 1 > LIMITS.nodes) return void toast.error(`В сцене не больше ${LIMITS.nodes} объектов.`)
-    // The text becomes a new merge group (the first letter is its base) where a new object would go.
+    // A merge holds at most LIMITS.mergeChildren letters: longer text becomes several merges split between words.
+    const chunks = chunkByWords(value, abc, LIMITS.mergeChildren)
     const { parent, index } = insertionPoint(scene, selected)
-    const withLetters = { ...scene, layers: [...scene.layers, ...letters.map((l, i) => (i === 0 ? { ...l, op: "union" as Op } : l))] }
-    const res = groupNodes(withLetters, letters.map((l) => l.id), "merge", { name: value.slice(0, 24) })
     const host = parent ? scene.layers.find((l) => l.id === parent) : undefined
     const p = isGroup(host) && host.mode === "merge" ? host.parent : parent
+    const issue = addIssue(scene.layers, p, 0, letters.length + chunks.length + (chunks.length > 1 ? 1 : 0))
+    if (issue) return void toast.error(issue)
+    // New text lands in the middle of the view; the view widens when the text does not fit.
+    const placed = placeInView(letters)
+    const res = groupText(scene, placed, chunks, value.slice(0, 24))
     setScene(res.id ? moveNode(res.scene, res.id, p, p === parent ? index : childrenOf(res.scene.layers, p).length) : res.scene)
     if (res.id) select(res.id)
+    const xs = placed.map((l) => l.x),
+      ys = placed.map((l) => l.y)
+    reveal({ x0: Math.min(...xs) - 3, y0: Math.min(...ys) - 3, x1: Math.max(...xs) + 3, y1: Math.max(...ys) + 3 })
+    if (chunks.length > 1) toast(`Текст разложен на ${chunks.length} сплава по словам: в одном сплаве не больше ${LIMITS.mergeChildren} знаков.`)
     if (missing.length) toast("Пропущены знаки вне сета: " + missing.join(" "))
     onDone()
   }
@@ -234,13 +246,17 @@ function AddMenu() {
     const host = parent ? scene.layers.find((l) => l.id === parent) : undefined
     // A group cannot go into a merge group: it lands next to it.
     const p = isGroup(node) && isGroup(host) && host.mode === "merge" ? host.parent : parent
+    const issue = addIssue(scene.layers, p, isGroup(node) ? 0 : 1, 1)
+    if (issue) return void toast.error(issue)
     const idx = p === parent ? index : childrenOf(scene.layers, p).length
     setScene((s) => moveNode({ ...s, layers: [...s.layers, node] }, node.id, p, idx))
     select(node.id)
   }
+  /** Next to the selected object, or in the middle of the view. */
   const near = () => {
     const sel = scene.layers.find((l) => l.id === selected[selected.length - 1])
-    return sel && !isGroup(sel) ? { x: sel.x + 3, y: sel.y, color: sel.color } : { x: 0, y: 0, color: inks[0] }
+    const v = runtime.view
+    return sel && !isGroup(sel) ? { x: sel.x + 3, y: sel.y, color: sel.color } : { x: v?.cx ?? 0, y: v?.cy ?? 0, color: inks[0] }
   }
   function addLetter(c: string) {
     const set = pickSet ?? scene.set
@@ -249,7 +265,8 @@ function AddMenu() {
   }
   /** A cloner group with one pattern tile of the geometric set: a ready grid to tweak. */
   function addCloner() {
-    if (scene.layers.length + 2 > LIMITS.nodes) return void toast.error(`В сцене не больше ${LIMITS.nodes} объектов.`)
+    const cloneIssue = addIssue(scene.layers, undefined, 0, 2)
+    if (cloneIssue) return void toast.error(cloneIssue)
     const n = near()
     const g = makeGroup("stack", {
       name: "Клонер",

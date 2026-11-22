@@ -27,6 +27,10 @@ export class Runtime {
   keepAlive = false
   /** Requests a studio frame; set by the canvas. */
   kick: () => void = () => {}
+  /** Visible part of the world on the studio canvas (centre and size), set by the canvas. */
+  view: { cx: number; cy: number; w: number; h: number } | null = null
+  /** Fits the studio view to a world box; set by the canvas. */
+  focus: (box: { x0: number; y0: number; x1: number; y1: number }) => void = () => {}
   /** Rigid-body world of the live view (created when physics is first on). */
   physics: PhysicsWorld | null = null
   private physicsLayers: Layer[] | null = null

@@ -335,3 +335,42 @@ describe("composition", () => {
     expect(f.items.map((it) => it.id)).toEqual([a.id, b.id])
   })
 })
+
+describe("limits never drop objects silently", () => {
+  const phrase = "AURORA ECLIPSE DYNAMIC TYPE SYSTEM LABORATORY"
+
+  it("splits long text into merges between words and keeps every letter", async () => {
+    const { chunkByWords, groupText, LIMITS: L } = await import("../scene")
+    const letters = layoutText(phrase, defaultAlphabet, defaultAxes, 0.15)
+    expect(letters).toHaveLength(40)
+    const chunks = chunkByWords(phrase, defaultAlphabet, L.mergeChildren)
+    expect(chunks.flat()).toEqual(letters.map((_, i) => i))
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(L.mergeChildren)
+    // Breaks fall between words: AURORA ECLIPSE DYNAMIC TYPE SYSTEM | LABORATORY.
+    expect(chunks.map((c) => c.length)).toEqual([30, 10])
+    const res = groupText(makeScene(), letters, chunks, phrase)
+    const kept = res.scene.layers.filter(isLetter)
+    expect(kept).toHaveLength(40)
+    expect(res.scene.layers.filter((l) => isGroup(l) && l.mode === "merge")).toHaveLength(2)
+    // The old single merge lost everything past 32 letters.
+    const single = groupNodes({ ...makeScene(), layers: letters }, letters.map((l) => l.id), "merge")
+    expect(single.scene.layers.filter(isLetter).length).toBe(32)
+  })
+
+  it("cuts a word longer than a merge", async () => {
+    const { chunkByWords } = await import("../scene")
+    const word = "A".repeat(70)
+    expect(chunkByWords(word, defaultAlphabet, 32).map((c) => c.length)).toEqual([32, 32, 6])
+  })
+
+  it("reports a full merge or a full scene before any edit", async () => {
+    const { addIssue, LIMITS: L } = await import("../scene")
+    const full = mergeScene(Array.from({ length: L.mergeChildren }, () => makeLayer("A")))
+    const g = full.layers[0]
+    expect(addIssue(full.layers, g.id, 1, 1)).toMatch(/В сплаве не больше 32/)
+    expect(addIssue(full.layers, undefined, 0, 1)).toBeNull()
+    const crowd = makeScene({ layers: Array.from({ length: L.nodes - 1 }, () => makeLayer("A")) })
+    expect(addIssue(crowd.layers, undefined, 0, 1)).toBeNull()
+    expect(addIssue(crowd.layers, undefined, 0, 2)).toMatch(/не больше 256/)
+  })
+})

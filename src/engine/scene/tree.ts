@@ -193,6 +193,29 @@ export function normalize(input: Layer[]): Layer[] {
   return layers
 }
 
+/* ---------- limits ---------- */
+
+/** Nodes in a subtree (the node itself included). */
+export function subtreeSize(layers: Layer[], id: string) {
+  const i = indexOf(layers, id)
+  return i < 0 ? 0 : subtreeEnd(layers, i) - i
+}
+
+/**
+ * Why adding `total` nodes, `leaves` of them straight into `parent`, would
+ * break the scene limits — or null when it fits. Edits check this before
+ * changing anything, so normalize() never has to drop objects.
+ */
+export function addIssue(layers: Layer[], parent: string | undefined, leaves: number, total: number): string | null {
+  if (layers.length + total > LIMITS.nodes) return `В сцене не больше ${LIMITS.nodes} объектов: сейчас ${layers.length}, добавляется ${total}.`
+  const host = parent ? layers.find((l) => l.id === parent) : undefined
+  if (isGroup(host) && host.mode === "merge") {
+    const n = layers.filter((l) => l.parent === host.id).length
+    if (n + leaves > LIMITS.mergeChildren) return `В сплаве не больше ${LIMITS.mergeChildren} объектов: в «${host.name ?? "Сплав"}» уже ${n}.`
+  }
+  return null
+}
+
 /* ---------- edits (pure: scene in, scene out) ---------- */
 
 /** Drops groups that had children before an edit and have none after it. */
@@ -304,6 +327,25 @@ export function groupNodes(scene: Scene, ids: string[], mode: GroupMode, over: P
   const inner = layers.filter((l) => inPicked.has(l.id)).map((l) => moved.get(l.id) ?? l)
   const next = [...rest.slice(0, at), g, ...inner, ...rest.slice(at)]
   return { scene: { ...scene, layers: pruneEmptied(layers, normalize(next)) }, id: g.id }
+}
+
+/**
+ * Adds laid-out letters as merge groups, one per chunk of letter indices
+ * (see chunkByWords); several chunks are wrapped into one stack group so
+ * the text moves as a whole. Returns the top node id.
+ */
+export function groupText(scene: Scene, letters: Layer[], chunks: (number[] & { label?: string })[], name: string): { scene: Scene; id: string | null } {
+  const firsts = new Set(chunks.map((c) => c[0]))
+  let s: Scene = { ...scene, layers: [...scene.layers, ...letters.map((l, i) => (firsts.has(i) ? { ...l, op: "union" as const } : l))] }
+  const merges: string[] = []
+  for (const c of chunks) {
+    const label = c.label ?? c.map((i) => (letters[i].type === "letter" ? letters[i].char : "")).join("")
+    const r = groupNodes(s, c.map((i) => letters[i].id), "merge", { name: chunks.length === 1 ? name : label })
+    s = r.scene
+    if (r.id) merges.push(r.id)
+  }
+  if (merges.length <= 1) return { scene: s, id: merges[0] ?? null }
+  return groupNodes(s, merges, "stack", { name })
 }
 
 /** Dissolves a group: its children move to the group's parent and keep their world placement. */

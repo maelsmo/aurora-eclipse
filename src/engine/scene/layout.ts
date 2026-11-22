@@ -44,3 +44,52 @@ export function layoutText(
   })
   return out
 }
+
+/**
+ * Splits the letters of a text laid out by layoutText into runs of at most
+ * `max` letters, breaking between words (a word longer than `max` is cut).
+ * Returns letter indices in layout order; each chunk carries its words as `label`.
+ */
+export type TextChunk = number[] & { label: string }
+
+export function chunkByWords(text: string, alphabet: Alphabet, max: number): TextChunk[] {
+  const words: { idx: number[]; text: string }[] = []
+  let word = { idx: [] as number[], text: "" }
+  let i = 0
+  const end = () => {
+    if (word.idx.length) words.push(word)
+    word = { idx: [], text: "" }
+  }
+  for (const raw of text) {
+    const c = raw.toLocaleUpperCase("ru")
+    if (c === " " || c === "\n") {
+      end()
+      continue
+    }
+    if (!(c in alphabet)) continue
+    word.idx.push(i++)
+    word.text += c
+  }
+  end()
+  const chunks: TextChunk[] = []
+  const make = (idx: number[], label: string) => Object.assign(idx, { label }) as TextChunk
+  let cur: number[] = []
+  let label: string[] = []
+  const flush = () => {
+    if (cur.length) chunks.push(make(cur, label.join(" ")))
+    cur = []
+    label = []
+  }
+  for (const w of words) {
+    if (w.idx.length > max) {
+      flush()
+      for (let k = 0; k < w.idx.length; k += max) chunks.push(make(w.idx.slice(k, k + max), w.text.slice(k, k + max)))
+      continue
+    }
+    if (cur.length + w.idx.length > max) flush()
+    cur.push(...w.idx)
+    label.push(w.text)
+  }
+  flush()
+  return chunks
+}
