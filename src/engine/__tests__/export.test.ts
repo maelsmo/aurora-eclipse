@@ -239,3 +239,49 @@ describe("export dialog defaults", () => {
     expect(exportDefaults(clear).transparent).toBe(true)
   })
 })
+
+describe("recipes load back", () => {
+  it("round trip: same sets are reused, a taken id with other content gets a new one", async () => {
+    const { readRecipe } = await import("../../state/recipe")
+    const { makeRecipe } = await import("../export")
+    const { makeScene } = await import("../scene")
+    const { mainSet, geoSet } = await import("../alphabet/sets")
+    const custom = { ...mainSet(), id: "mine", name: "Мой", glyphs: { A: { prims: [{ kind: "dot" as const, c: [1, 1] as [number, number], r: 1 }] } } }
+    const scene = makeScene({ set: "mine", layers: [makeLayer("A"), makeLayer("B", { set: "geo" })] })
+    const recipe = JSON.parse(JSON.stringify(makeRecipe(scene, [mainSet(), geoSet(), custom])))
+    // Same library: everything reused.
+    const same = readRecipe(recipe, [mainSet(), geoSet(), custom])
+    expect(same.ok && same.sets).toEqual([])
+    expect(same.ok && same.scene.set).toBe("mine")
+    // Another library where "mine" means something else: imported under a new id, references follow.
+    const other = { ...custom, glyphs: {} }
+    const res = readRecipe(recipe, [mainSet(), geoSet(), other])
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.sets).toHaveLength(1)
+    expect(res.sets[0].id).not.toBe("mine")
+    expect(res.sets[0].name).toContain("из рецепта")
+    expect(res.scene.set).toBe(res.sets[0].id)
+    expect(res.scene.layers.find((l) => l.type === "letter" && l.char === "B")!.type === "letter" && (res.scene.layers.find((l) => l.type === "letter" && l.char === "B") as { set?: string }).set).toBe("geo")
+    // Missing set: added as is.
+    const fresh = readRecipe(recipe, [mainSet(), geoSet()])
+    expect(fresh.ok && fresh.sets.map((s) => s.id)).toEqual(["mine"])
+  })
+
+  it("refuses a foreign file with a clear message", async () => {
+    const { readRecipe } = await import("../../state/recipe")
+    const r = readRecipe({ format: "something-else" }, [])
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/не рецепт Aurora Eclipse/)
+  })
+})
+
+describe("video bitrate", () => {
+  it("scales with the frame and keeps a floor", async () => {
+    const { defaultBitrate } = await import("../export/video")
+    expect(defaultBitrate(1920, 1080, 30)).toBe(12e6)
+    expect(defaultBitrate(640, 374, 30)).toBe(4e6)
+    expect(defaultBitrate(1280, 720, 30)).toBeCloseTo(5.33e6, -4)
+    expect(defaultBitrate(3840, 2160, 60)).toBe(16e6)
+  })
+})

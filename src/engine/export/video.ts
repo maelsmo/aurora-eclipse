@@ -23,10 +23,13 @@ export type VideoOptions = {
 /** H.264 needs even dimensions. */
 export const even = (v: number) => Math.max(2, Math.round(v / 2) * 2)
 
-/** Bitrate for a size: 12 Mbit/s for 1080p, up to 16 for larger frames. */
+/**
+ * Bitrate by frame area and rate: 12 Mbit/s for 1080p30, never above
+ * 16 Mbit/s nor below 4 Mbit/s (small flat graphics still need clean edges).
+ */
 export function defaultBitrate(width: number, height: number, fps: number) {
   const px = width * height * (fps / 30)
-  return Math.round(Math.min(16e6, Math.max(12e6, (px / (1920 * 1080)) * 12e6)))
+  return Math.round(Math.min(16e6, Math.max(4e6, (px / (1920 * 1080)) * 12e6)))
 }
 
 /**

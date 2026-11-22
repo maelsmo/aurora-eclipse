@@ -27,7 +27,8 @@ import { isGeo } from "@/engine/types"
 const sizeDef = { label: "Размер", min: 0.5, max: 2, step: 0.05 }
 const radiusDef = { label: "Радиус", min: 0.5, max: 4, step: 0.5, unit: "m" }
 const angleDef = (label: string) => ({ label, min: -360, max: 720, step: 15, unit: "°" })
-const advDef = { label: "Ширина знака", min: 1, max: 7, step: 0.5, unit: "m" }
+// Wide letters of the geometric set are three cells (7.5 m); leave room above them.
+const advDef = { label: "Ширина знака", min: 1, max: 10, step: 0.5, unit: "m" }
 
 
 export function GlyphPanel({ selected, onSelect }: { selected: number | null; onSelect: (i: number | null) => void }) {

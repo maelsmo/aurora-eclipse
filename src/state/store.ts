@@ -71,6 +71,8 @@ type Actions = {
   renameSet: (id: string, name: string) => void
   deleteSet: (id: string) => void
   setSetLook: (id: string, look: LookPatch | undefined) => void
+  /** Adds sets as they are (ids already checked by the caller, e.g. readRecipe). */
+  importSets: (sets: GlyphSet[]) => void
 
   set: (p: Partial<State>) => void
   saveToCollection: (name: string, scene: Scene) => boolean
@@ -209,6 +211,11 @@ export const useStore = create<State & Actions>()((set, get) => {
     },
     setEditingSet: (id) => {
       if (get().sets.some((s) => s.id === id)) set({ editingSet: id })
+    },
+    importSets: (sets) => {
+      if (!sets.length) return
+      const have = new Set(get().sets.map((x) => x.id))
+      changeSets([...get().sets, ...sets.filter((x) => !have.has(x.id))])
     },
     addSet: (name, opts = {}) => {
       const id = uid()
