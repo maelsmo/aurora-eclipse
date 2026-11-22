@@ -29,6 +29,7 @@ import { GlyphList } from "./GlyphList"
 import { GlyphEditor } from "./GlyphEditor"
 import { GlyphPanel } from "./GlyphPanel"
 import type { Tool } from "./editing"
+import { shortcutKey } from "@/lib/keys"
 
 const tools: { value: Tool; label: string; hint: string; Icon: typeof Circle }[] = [
   { value: "select", label: "Выбор", hint: "Выбрать и двигать модули (V)", Icon: MousePointer2 },
@@ -83,7 +84,7 @@ export function Constructor() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (e.metaKey || e.ctrlKey || e.altKey || el.closest("input, textarea, [contenteditable]")) return
-      const t = keys[e.code.startsWith("Key") ? e.code.slice(3).toLowerCase() : e.key.toLowerCase()]
+      const t = keys[shortcutKey(e)]
       if (t) setTool(t)
     }
     window.addEventListener("keydown", onKey)
