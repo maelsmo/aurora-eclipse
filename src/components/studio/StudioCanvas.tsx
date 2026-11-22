@@ -38,11 +38,22 @@ import {
 const FAR: [number, number] = [1e4, 1e4]
 const ACCENT = "91,60,245"
 
+/**
+ * Does the scene answer the pointer without time running (redraw on pointer
+ * moves even when paused)? The lens, pointer signals, follow/avoid motion and
+ * cloner fields around the pointer do; physics forces do not — a paused
+ * simulation stays frozen, the pointer included.
+ */
 function usesPointer(s: Scene) {
   return (
     s.warp.pointer !== 0 ||
     s.routes.some((r) => r.source.startsWith("pointer")) ||
-    s.layers.some((l) => l.motion.type === "follow" || l.motion.type === "avoid")
+    s.layers.some(
+      (l) =>
+        l.motion.type === "follow" ||
+        l.motion.type === "avoid" ||
+        (l.type === "group" && !!l.cloner?.enabled && l.cloner.effectors.some((e) => e.enabled && e.kind === "field" && e.source === "pointer")),
+    )
   )
 }
 

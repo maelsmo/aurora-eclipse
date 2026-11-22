@@ -60,6 +60,9 @@ function frontField(f: Frame, it: FrameItem, r: Region): Field | null {
   }
 }
 
+/** Node ids (imported scenes may carry anything) as safe XML id characters. */
+export const xmlId = (id: string) => id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64)
+
 /** Can this item be drawn as a placed copy of its glyph (no warp, mask or per-pixel colour)? */
 function placeable(f: Frame, it: FrameItem) {
   return (
@@ -293,7 +296,7 @@ export function frameToSVG(frame: Frame, material: Material, opts: SvgOptions = 
       for (const [color, list] of byColor) parts.push(`<g fill="${color}">${list.join("")}</g>`)
       tick()
     }
-    if (parts.length) groups.push(`<g id="${uidPrefix}${it.id.replace(/#/g, "-")}"${op}${clipAttr}>${parts.join("")}</g>`)
+    if (parts.length) groups.push(`<g id="${uidPrefix}${xmlId(it.id)}"${op}${clipAttr}>${parts.join("")}</g>`)
   })
   onProgress?.(1)
   const bg = transparent ? "" : `<rect width="${W}" height="${H}" fill="${m.background}"/>`

@@ -285,3 +285,16 @@ describe("video bitrate", () => {
     expect(defaultBitrate(3840, 2160, 60)).toBe(16e6)
   })
 })
+
+describe("svg ids", () => {
+  it("node ids from imported scenes cannot break the markup", async () => {
+    const { makeScene, makeShape, defaultLook } = await import("../scene")
+    const evil = { ...makeShape({ kind: "rect", w: 2, h: 2 }), id: 'x"><script>alert(1)</script><g a="' }
+    const s = makeScene({ layers: [evil], look: { ...defaultLook, mode: "outline" } })
+    const svg = frameToSVG(buildFrame(s, defaultLibrary(), 0, [1e4, 1e4]), s.material, { box: { x0: -5, y0: -5, x1: 5, y1: 5 } })
+    expect(svg).not.toContain("<script")
+    const ids = [...svg.matchAll(/ id="([^"]*)"/g)].map((m) => m[1])
+    expect(ids.length).toBeGreaterThan(0)
+    for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9_-]+$/)
+  })
+})

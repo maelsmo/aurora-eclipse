@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowDownToLine,
   ArrowUpToLine,
+  CaseUpper,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
@@ -302,7 +303,7 @@ function AddMenu() {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuItem onClick={() => setPanel("letter")}>
-            <Type />
+            <CaseUpper />
             Буква…
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setPanel("text")}>
